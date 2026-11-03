@@ -69,6 +69,8 @@ pub enum Draw {
     TintedImage(String, Rect, f32, bool, Color),
     /// Installed icon and its backdrop, composited before opacity and edge fading.
     AppImage(Arc<crate::app_artwork::Artwork>, Rect, f32, Color),
+    /// Installed icon alone, alpha preserved, drawn over a caller-painted plate.
+    AppIcon(Arc<crate::app_artwork::Artwork>, Rect, Color),
     Clip(Option<Rect>),
     EdgeFade(Option<[f32; 4]>),
     /// Horizontal counterpart: [left fade-in start, end, right fade-out start, end].
@@ -294,6 +296,7 @@ fn profile_skip(command: &Draw) -> bool {
         }
         Draw::Image(..) | Draw::TintedImage(..) => "image",
         Draw::AppImage(..) => "app",
+        Draw::AppIcon(..) => "app",
         Draw::Shape(..) => "shape",
         Draw::RoundedGradient(..) => "gradient",
         Draw::Shadow(..) => "shadow",
@@ -1138,6 +1141,38 @@ impl Renderer {
         );
     }
 
+    /// An installed icon alone, contain-fitted inside `rect` and keeping its real alpha, so a
+    /// translucent plate painted underneath stays visible around it. Unlike `app_image` this
+    /// does not take the shader's opaque app path, so no backdrop is filled behind it.
+    fn app_icon(&mut self, image: &crate::app_artwork::Artwork, rect: Rect, tint: Color) {
+        let entry = self.textures.entry(image.key.clone()).or_insert_with(|| {
+            Some(texture(
+                image.pixels.width(),
+                image.pixels.height(),
+                image.pixels.as_raw(),
+            ))
+        });
+        let Some(texture) = entry else {
+            return;
+        };
+        texture.frame = self.frame;
+        let scale = (rect.w / texture.width as f32).min(rect.h / texture.height as f32);
+        let w = texture.width as f32 * scale;
+        let h = texture.height as f32 * scale;
+        let id = texture.id;
+        // A squircle, like the plate it sits on: the shader clamps the radius to half the
+        // shorter side, so this stays a rounded square rather than a circle.
+        let radius = w.min(h) * 0.22;
+        self.quad(
+            Rect::new(rect.x + (rect.w - w) / 2., rect.y + (rect.h - h) / 2., w, h),
+            [0., 0., 1., 1.],
+            radius,
+            0.,
+            tint,
+            id,
+        );
+    }
+
     /// A logical damage rect in drawable pixels ([x, y, width, height], origin bottom-left),
     /// grown to whole pixels.
     pub fn damage_pixels(rect: Rect, width: u32, height: u32) -> [i32; 4] {
@@ -1272,6 +1307,7 @@ impl Renderer {
                 Draw::AppImage(image, rect, radius, tint) => {
                     self.app_image(image, *rect, *radius, *tint)
                 }
+                Draw::AppIcon(image, rect, tint) => self.app_icon(image, *rect, *tint),
                 Draw::Clip(clip) => self.clip = *clip,
                 Draw::EdgeFade(fade) => self.set_fade(0, *fade),
                 Draw::EdgeFadeX(fade) => self.set_fade(4, *fade),

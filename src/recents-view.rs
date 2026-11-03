@@ -112,9 +112,7 @@ pub fn render(out: &mut Scene, state: &State, assets: &Assets) {
                 .iter()
                 .find(|app| app.id == entry.app.id)
                 .unwrap_or(&entry.app);
-            if !glass_face(assets, app) {
-                out.shadow(rect, radius, 48., 22., 0.28 + 0.27 * prominence);
-            }
+            out.shadow(rect, radius, 48., 22., 0.28 + 0.27 * prominence);
             app_face(out, assets, app, rect, language, radius);
             out.border(
                 rect,

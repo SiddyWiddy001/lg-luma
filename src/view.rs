@@ -256,7 +256,8 @@ impl Scene {
                 | Draw::Shadow(_, _, _, color)
                 | Draw::Text(_, _, _, color, _)
                 | Draw::TintedImage(_, _, _, _, color)
-                | Draw::AppImage(_, _, _, color) => apply(color),
+                | Draw::AppImage(_, _, _, color)
+                | Draw::AppIcon(_, _, color) => apply(color),
                 Draw::RoundedGradient(_, _, a, b) => {
                     apply(a);
                     apply(b);
@@ -817,17 +818,15 @@ fn tile(
     }
     let start = out.draw.len();
     let focused = state.focus == Target::App(app.id.clone());
-    // A filled shadow would show through a translucent glass face and read as
-    // a dark rectangle, so keep the depth cue only under opaque installed icons.
-    if !glass_face(assets, app) {
-        out.shadow(
-            rect,
-            19.2,
-            if focused { 34. } else { 22. },
-            if focused { 14. } else { 9. },
-            if focused { 0.4 } else { 0.165 },
-        );
-    }
+    // The shadow is only painted outside the face, so it keeps depth under the
+    // translucent glass plate without darkening the plate itself.
+    out.shadow(
+        rect,
+        19.2,
+        if focused { 34. } else { 22. },
+        if focused { 14. } else { 9. },
+        if focused { 0.4 } else { 0.165 },
+    );
     let favorite_color = app_face(out, assets, app, rect, state.preferences.language, 19.2);
     if pinned {
         favorite_badge(out, assets, rect, favorite_color);
@@ -895,18 +894,15 @@ fn tile(
 
 fn favorite_badge(out: &mut Scene, assets: &Assets, card: Rect, color: Color) {
     let icon = Rect::new(card.x + card.w - 27.2, card.y + 11.2, 16., 16.);
+    // The plate is translucent, so its brightness tracks the wallpaper behind it. A soft dark
+    // offset underneath keeps the heart legible on both light and dark glass.
+    out.icon(
+        assets,
+        "heart-filled",
+        Rect::new(icon.x, icon.y - 2., icon.w, icon.h),
+        c(0x03060a, 0.38),
+    );
     out.icon(assets, "heart-filled", icon, color);
-}
-
-/// True when an app face has no opaque installed artwork, so it is painted as
-/// a translucent glass plate instead of a surface image.
-fn glass_face(assets: &Assets, app: &App) -> bool {
-    crate::branding::for_key(&app.brand).is_some()
-        || app
-            .icon
-            .as_ref()
-            .and_then(|source| assets.artwork.get(source))
-            .is_none()
 }
 
 /// Shared card artwork for Home, Apps and Recents. Curated vectors always take
@@ -939,14 +935,23 @@ fn app_face(
         c(0xffffff, 1.)
     };
     let installed = artwork.is_some();
+    // A translucent tvOS-style plate under real artwork: a light milky haze that lifts the
+    // wallpaper behind it, a wide soft glow and a crisp rim catching the light. Apps with no
+    // artwork keep the opaque generic surface instead, because its white mark needs a dark
+    // backdrop to stay legible.
+    if installed || logo.is_some() {
+        out.draw.push(Draw::RoundedGradient(
+            rect,
+            radius,
+            c(0xdce8f2, 0.30),
+            c(0xa6b8c8, 0.17),
+        ));
+        out.border(rect, radius, 3., c(0xffffff, 0.05));
+        out.border(rect, radius, 1., c(0xffffff, 0.28));
+    }
     if let Some(image) = artwork {
-        out.draw.push(Draw::AppImage(image, rect, radius, [1.; 4]));
-        out.border(rect, radius, 1., c(0xffffff, 0.063));
-    } else {
-        // tvOS-style milky glass: no opaque surface plate, so the wallpaper
-        // shows through the face and the rim catches the light.
-        out.shape(rect, radius, c(0x111417, 0.25));
-        out.border(rect, radius, 1., c(0xffffff, 0.15));
+        // Inset so the glass shows around the icon; the icon keeps its own alpha here.
+        out.draw.push(Draw::AppIcon(image, rect.inset(rect.h * 0.11), [1.; 4]));
     }
     if let Some(brand) = logo {
         let (ratio, height) = brand.artwork_size();
