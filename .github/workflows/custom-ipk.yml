@@ -1,0 +1,51 @@
+name: Custom IPK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build custom ARM IPK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - uses: dtolnay/rust-toolchain@1.93.0
+        with:
+          targets: armv7-unknown-linux-gnueabi
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: custom-webos
+      - name: Install asset and cross-build dependencies
+        run: |
+          apt_options=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install -y --no-install-recommends \
+            libsdl2-dev pkg-config woff2 python3-fonttools
+      - name: Generate native assets
+        run: pnpm assets
+      - name: Set up the webOS SDK
+        run: pnpm sdk
+      - name: Cross-build the native IPK
+        run: |
+          export WEBOS_NDK="$GITHUB_WORKSPACE/.build/toolchain/arm-webos-linux-gnueabi_sdk-buildroot"
+          pnpm build
+          node tools/package.mjs
+      - name: Upload IPK
+        uses: actions/upload-artifact@v7
+        with:
+          name: luma-custom-ipk
+          if-no-files-found: error
+          path: |
+            dist/*.ipk
+            dist/sha256sums

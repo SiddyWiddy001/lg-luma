@@ -106,13 +106,15 @@ pub fn render(out: &mut Scene, state: &State, assets: &Assets) {
             let focused = *focus == target;
             let radius = 26. * rect.w / 900.;
             let prominence = (1. - depth).clamp(0., 1.);
-            out.shadow(rect, radius, 48., 22., 0.28 + 0.27 * prominence);
             let app = state
                 .inventory
                 .apps
                 .iter()
                 .find(|app| app.id == entry.app.id)
                 .unwrap_or(&entry.app);
+            if !glass_face(assets, app) {
+                out.shadow(rect, radius, 48., 22., 0.28 + 0.27 * prominence);
+            }
             app_face(out, assets, app, rect, language, radius);
             out.border(
                 rect,

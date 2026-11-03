@@ -632,7 +632,7 @@ pub fn scene_with_pill(
         };
         out.controls.clear();
         let start = out.draw.len();
-        out.shape(Rect::new(0., 0., 1920., 1080.), 0., c(0x080b12, 0.70));
+        out.shape(Rect::new(0., 0., 1920., 1080.), 0., c(0x080b12, 0.55));
         if matches!(
             overlay,
             Overlay::Options { .. } | Overlay::BackgroundOptions { .. }
@@ -722,7 +722,7 @@ fn header(
     let layout = navigation(assets, language);
     let nav = layout.surface;
     out.shadow(nav, 48., 18., 4., 0.06);
-    out.shape(nav, 48., c(0x171c20, 0.72));
+    out.shape(nav, 48., c(0x171c20, 0.45));
     out.border(nav, 48., 1., c(0xffffff, 0.07));
     let pill = Rect::new(pill_x, 52.3, pill_width, 49.);
     out.draw.push(Draw::RoundedGradient(
@@ -817,13 +817,17 @@ fn tile(
     }
     let start = out.draw.len();
     let focused = state.focus == Target::App(app.id.clone());
-    out.shadow(
-        rect,
-        19.2,
-        if focused { 34. } else { 22. },
-        if focused { 14. } else { 9. },
-        if focused { 0.4 } else { 0.165 },
-    );
+    // A filled shadow would show through a translucent glass face and read as
+    // a dark rectangle, so keep the depth cue only under opaque installed icons.
+    if !glass_face(assets, app) {
+        out.shadow(
+            rect,
+            19.2,
+            if focused { 34. } else { 22. },
+            if focused { 14. } else { 9. },
+            if focused { 0.4 } else { 0.165 },
+        );
+    }
     let favorite_color = app_face(out, assets, app, rect, state.preferences.language, 19.2);
     if pinned {
         favorite_badge(out, assets, rect, favorite_color);
@@ -894,6 +898,17 @@ fn favorite_badge(out: &mut Scene, assets: &Assets, card: Rect, color: Color) {
     out.icon(assets, "heart-filled", icon, color);
 }
 
+/// True when an app face has no opaque installed artwork, so it is painted as
+/// a translucent glass plate instead of a surface image.
+fn glass_face(assets: &Assets, app: &App) -> bool {
+    crate::branding::for_key(&app.brand).is_some()
+        || app
+            .icon
+            .as_ref()
+            .and_then(|source| assets.artwork.get(source))
+            .is_none()
+}
+
 /// Shared card artwork for Home, Apps and Recents. Curated vectors always take
 /// precedence over installed artwork, with the same relative logo proportions.
 fn app_face(
@@ -926,15 +941,13 @@ fn app_face(
     let installed = artwork.is_some();
     if let Some(image) = artwork {
         out.draw.push(Draw::AppImage(image, rect, radius, [1.; 4]));
+        out.border(rect, radius, 1., c(0xffffff, 0.063));
     } else {
-        out.image(
-            assets.path(format!("surfaces/{}.png", app.brand)),
-            rect,
-            radius,
-            false,
-        );
+        // tvOS-style milky glass: no opaque surface plate, so the wallpaper
+        // shows through the face and the rim catches the light.
+        out.shape(rect, radius, c(0x111417, 0.25));
+        out.border(rect, radius, 1., c(0xffffff, 0.15));
     }
-    out.border(rect, radius, 1., c(0xffffff, 0.063));
     if let Some(brand) = logo {
         let (ratio, height) = brand.artwork_size();
         let height = height * rect.h / FACE_HEIGHT;
@@ -1278,14 +1291,14 @@ fn home(out: &mut Scene, state: &State, assets: &Assets, now: OffsetDateTime) {
             rect,
             18.4,
             if focused {
-                c(0x30363c, 0.70)
+                c(0x30363c, 0.45)
             } else {
-                c(0x20252b, 0.60)
+                c(0x20252b, 0.35)
             },
             if focused {
-                c(0x242a30, 0.65)
+                c(0x242a30, 0.42)
             } else {
-                c(0x171c22, 0.55)
+                c(0x171c22, 0.32)
             },
         ));
         out.border(
