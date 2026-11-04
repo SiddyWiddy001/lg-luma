@@ -208,6 +208,17 @@ pub const KEYS: [&str; 40] = [
     "Delete", "Clear", "Done",
 ];
 
+/// A tile pressed with OK whose icon is flying out to fill the screen while the app starts.
+/// The scene reports the card's own face through `Scene::launch_source`, so the zoom begins
+/// exactly where that icon was drawn.
+pub struct LaunchZoom {
+    pub app: String,
+    pub started: Instant,
+}
+
+/// Seconds the launch icon takes to grow from the card and fade away.
+pub const LAUNCH_ZOOM: f32 = 0.5;
+
 pub struct State {
     pub page: Page,
     pub focus: Target,
@@ -253,14 +264,13 @@ pub struct State {
     /// Per-app hover lift (0..1), eased toward 1 for the focused card each frame by the
     /// frame loop, so a focused icon rises smoothly instead of snapping.
     pub app_lift: HashMap<String, f32>,
-    /// The focus halo's animated rect ([x, y, w, h]), corner radius and intensity. The
-    /// frame loop slides them toward the focused card so the glow glides between apps
-    /// instead of teleporting.
-    pub halo: Option<[f32; 4]>,
-    pub halo_radius: f32,
-    pub halo_alpha: f32,
-    /// Where the halo wants to be, carried out of the last composed scene by `compose`.
-    pub halo_target: Option<([f32; 4], f32)>,
+    /// How far the focused card is pressed down (0..1), eased by the frame loop while OK is
+    /// held. It shrinks and darkens the tile, then eases back out on release; the launch zoom
+    /// freezes it so the icon flies out from the shrunken face.
+    pub press_depth: f32,
+    /// The app whose icon is zooming out on launch, if one started this frame. The frame
+    /// loop keeps the scene dirty while it animates and clears it when the fade finishes.
+    pub launch_zoom: Option<LaunchZoom>,
 }
 
 impl State {
@@ -305,10 +315,8 @@ impl State {
             input_name: String::new(),
             recents: crate::recents::Recents::default(),
             app_lift: HashMap::new(),
-            halo: None,
-            halo_radius: 0.,
-            halo_alpha: 0.,
-            halo_target: None,
+            press_depth: 0.,
+            launch_zoom: None,
         }
     }
 

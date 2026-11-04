@@ -194,8 +194,9 @@ pub struct Scene {
     pub draw: Vec<Draw>,
     pub controls: Vec<Control>,
     pub modal: Option<Rect>,
-    /// Where the focus halo should slide to, reported by the focused tile this frame.
-    pub halo_target: Option<([f32; 4], f32)>,
+    /// The launching tile's own face rect, reported by the tile so the zoom transition
+    /// starts exactly where that icon was drawn.
+    pub launch_source: Option<[f32; 4]>,
 }
 impl Scene {
     fn new() -> Self {
@@ -203,7 +204,7 @@ impl Scene {
             draw: Vec::new(),
             controls: Vec::new(),
             modal: None,
-            halo_target: None,
+            launch_source: None,
         }
     }
     fn shape(&mut self, rect: Rect, radius: f32, fill: Color) {
@@ -243,25 +244,26 @@ impl Scene {
         });
     }
     fn ring(&mut self, rect: Rect, radius: f32, intensity: f32) {
-        // Liquid focus halo: overlapping thin rings outside the card, brightest close to the
-        // edge and fading out, so the highlight reads as light behind the glass rather than a
-        // hard stroke. Only the focused card pays for these, so the layers are cheap. The
-        // intensity fades the whole glow while the frame loop slides it between cards.
-        let steps = 14;
-        for step in 1..=steps {
-            let grow = 1.6 + step as f32 * 1.35;
-            let falloff = 1. - step as f32 / steps as f32;
-            let alpha = (0.012 + 0.085 * falloff * falloff) * intensity;
-            self.border(
-                rect.inset(-grow),
-                radius + grow,
-                2.9,
-                c(0xdfe9ff, alpha),
-            );
+        // Focus rim: a soft inner band and a light edge sitting right against the card. It
+        // is drawn on the card's own rect, so focus moves with the selection instead of an
+        // outline sliding across the screen, and `intensity` fades it in and out. The wide
+        // bleed comes from glow() behind the tile, not from these two strokes.
+        self.border(rect.inset(-2.6), radius + 2.6, 5.2, c(0xeaf2ff, 0.22 * intensity));
+        self.border(rect.inset(-1.2), radius + 1.2, 2.2, c(0xffffff, 0.55 * intensity));
+    }
+    /// Focus bloom behind a card: filled rounded shapes that expand outward and fade, so
+    /// light bleeds from behind the glass. The tile is painted over them, leaving only the
+    /// halo outside its edges: a soft glow rather than a hard outline that teleports.
+    fn glow(&mut self, rect: Rect, radius: f32, intensity: f32) {
+        for (grow, alpha) in [
+            (4., 0.16),
+            (9., 0.11),
+            (15., 0.075),
+            (23., 0.05),
+            (34., 0.03),
+        ] {
+            self.shape(rect.inset(-grow), radius + grow, c(0xe8eef8, alpha * intensity));
         }
-        // A soft inner band and a bright rim sit right against the tile.
-        self.border(rect.inset(-2.6), radius + 2.6, 5.2, c(0xeaf2ff, 0.30 * intensity));
-        self.border(rect.inset(-1.2), radius + 1.2, 2.4, c(0xffffff, 0.92 * intensity));
     }
     fn shadow(&mut self, rect: Rect, radius: f32, blur: f32, y: f32, alpha: f32) {
         self.draw.push(Draw::Shadow(
@@ -610,15 +612,6 @@ pub fn scene_with_pill(
         Page::Apps => library(&mut out, state, assets),
         Page::Settings => settings(&mut out, state, assets),
     }
-    // The focus halo is drawn at its animated position rather than the focused card's own
-    // rect, so it slides from one app to the next while the frame loop interpolates state.halo
-    // toward the destination tile() reported last frame.
-    if state.halo_alpha > 0.012 {
-        if let Some([x, y, w, h]) = state.halo {
-            let rect = Rect::new(x, y, w, h);
-            out.ring(rect, state.halo_radius, state.halo_alpha);
-        }
-    }
     if let Some(error) = &state.error
         && !state.inventory.apps.is_empty()
         && !out
@@ -756,6 +749,60 @@ pub fn scene_with_pill(
             out.modal = parent_modal;
         }
     }
+    if let Some(zoom) = &state.launch_zoom {
+        // Launch zoom: the pressed card's own icon texture grows from the exact face it was
+        // drawn on and fades to nothing as the app takes over the screen. A glow behind the
+        // growing plate keeps light bleeding outward, so it reads as energy leaving the tile.
+        if let Some(app) = state.inventory.apps.iter().find(|item| item.id == zoom.app) {
+            let elapsed = zoom.started.elapsed().as_secs_f32();
+            let t = (elapsed / crate::state::LAUNCH_ZOOM).min(1.);
+            let source =
+                out.launch_source
+                    .map(|[x, y, w, h]| Rect::new(x, y, w, h))
+                    .unwrap_or_else(|| {
+                        out.controls
+                            .iter()
+                            .find(|control| control.target == Target::App(app.id.clone()))
+                            .map(|control| {
+                                let mut rect = control.rect;
+                                let names = if state.page == Page::Home {
+                                    state.preferences.show_home_names
+                                } else {
+                                    state.preferences.show_app_names
+                                };
+                                if names {
+                                    rect.h -= 18.4 + caption_height(state, assets, app, rect.w);
+                                }
+                                rect
+                            })
+                            .unwrap_or(Rect::new(830., 410., 260., 260.))
+                    });
+            // Ease-out cubic: fast at the start of the launch, decelerating as it fades.
+            let ease = 1. - (1. - t).powi(3);
+            let scale = 1. + 1.5 * ease;
+            let rect = Rect::new(
+                source.x + source.w * (1. - scale) / 2.,
+                source.y + source.h * (1. - scale) / 2.,
+                source.w * scale,
+                source.h * scale,
+            );
+            let radius = squircle(rect);
+            let start = out.draw.len();
+            // Bloom, plate and icon fade as one unit; the bloom is inside the faded range so
+            // the whole gesture dissolves instead of leaving a hard halo behind.
+            out.glow(rect, radius, (1. - t) * 0.7);
+            app_face(
+                out,
+                assets,
+                app,
+                rect,
+                state.preferences.language,
+                radius,
+                0.,
+            );
+            out.fade(start, 1. - t, 1.);
+        }
+    }
     if let Some((notice, _)) = &state.notice {
         toast(&mut out, state, assets, notice);
     }
@@ -884,8 +931,13 @@ fn tile(
     // Hover lift: the frame loop eases this 0..1 value, so the plate and artwork grow to a
     // 5% larger footprint and brighten slightly while focused, then settle back on blur.
     let lift = state.app_lift.get(&app.id).copied().unwrap_or(0.);
-    let face = if lift > 0.002 {
-        let scale = 1. + 0.05 * lift;
+    // Press-and-hold feedback: `press_depth` eases 0..1 in the frame loop while OK is held on
+    // the focused card, so the tile shrinks to 0.90x and darkens, then pops back to its 1.05x
+    // focused size when released. Releasing into a launch starts the zoom from this shrunken
+    // face because the zoom copies the face the tile drew this frame.
+    let press = if focused { state.press_depth } else { 0. };
+    let face = if lift > 0.002 || press > 0.002 {
+        let scale = 1. + 0.05 * lift - 0.15 * press;
         let (cx, cy) = rect.center();
         Rect::new(
             cx - rect.w * scale / 2.,
@@ -897,9 +949,10 @@ fn tile(
         rect
     };
     let radius = squircle(face);
-    if focused {
-        // Report the halo's destination (the lifted face) for the sliding focus glow.
-        out.halo_target = Some(([face.x, face.y, face.w, face.h], radius));
+    if state.launch_zoom.as_ref().is_some_and(|zoom| zoom.app == app.id) {
+        // The launch zoom starts from this exact face, so the flying icon lines up with the
+        // tile it came from instead of guessing at a layout position.
+        out.launch_source = Some([face.x, face.y, face.w, face.h]);
     }
     // The shadow is only painted outside the face, so it keeps depth under the
     // translucent glass plate without darkening the plate itself.
@@ -910,6 +963,11 @@ fn tile(
         if focused { 14. } else { 9. },
         if focused { 0.4 } else { 0.165 },
     );
+    // Focus bloom behind the tile, riding the same eased lift value: it grows out of the
+    // card's own rect, so it never slides across the screen when focus moves.
+    if lift > 0.01 {
+        out.glow(face, radius, lift);
+    }
     let favorite_color = app_face(
         out,
         assets,
@@ -919,6 +977,9 @@ fn tile(
         radius,
         lift,
     );
+    if lift > 0.01 {
+        out.ring(face, radius, lift);
+    }
     if pinned {
         favorite_badge(out, assets, face, favorite_color);
     }
@@ -946,8 +1007,10 @@ fn tile(
     if state.page == Page::Apps && state.filter == 5 {
         out.fade(start, 0.45, 1.);
     }
-    if state.pressed.as_ref() == Some(&Target::App(app.id.clone())) {
-        out.fade(start, 1., 0.85);
+    if press > 0.002 {
+        // Held down: plate, icon, bloom and caption darken together while the card shrinks,
+        // and the eased value fades the dim back out on release instead of snapping it off.
+        out.fade(start, 1., 1. - 0.15 * press);
     }
     if names {
         out.text(
