@@ -989,6 +989,9 @@ fn run() -> Result<(), String> {
     let mut inventory_retry: Option<Instant> = None;
     let mut input_refresh = input_refresh::Refresh::default();
     let scripted_input = !options.script.is_empty();
+    // Consecutive idle waits with nothing to draw or wait on; lets the loop back off its timed
+    // wake instead of polling every 100 ms on an untouched screen.
+    let mut idle_waits = 0u32;
     let mut scene = compose(
         &mut state,
         &assets,
@@ -997,6 +1000,10 @@ fn run() -> Result<(), String> {
         options.time.unwrap_or_else(OffsetDateTime::now_utc),
     );
     while running {
+        // Any event the previous wait returned means the screen is active again.
+        if queued_event.is_some() {
+            idle_waits = 0;
+        }
         let now = options
             .time
             .unwrap_or_else(|| OffsetDateTime::now_utc().to_offset(local_offset));
@@ -1942,6 +1949,8 @@ fn run() -> Result<(), String> {
                 }
             }
             state.dirty = false;
+            // A painted frame is activity; start the idle backoff over from the short wake.
+            idle_waits = 0;
         }
         frame += 1;
         if final_frame {
@@ -1990,29 +1999,58 @@ fn run() -> Result<(), String> {
         // VSync paces animation; holds, scripted checks and icons still being
         // decoded need short timed wakes.
         let timeout = if !visible {
+            idle_waits = 0;
             250
         } else if options.profile_frames.is_some() {
             // Profiling measures presentations, so it keeps polling and lets the swap pace it.
+            idle_waits = 0;
             0
         } else if pill != target || pill_width != target_width || state.animating() {
             // Animation in progress. When the swap blocks on the display this polls for free;
             // when SDL refused the swap interval it waits out a frame instead of spinning the
             // CPU at full rate.
+            idle_waits = 0;
             if vsync { 0 } else { 16 }
         } else if ken_burns {
             // About 30 fps is ample for a 5% pan over half a minute, and keeps the launcher
             // from presenting at full refresh rate forever.
+            idle_waits = 0;
             33
         } else if press.is_some()
             || back_button.press.is_some()
             || options.frames.is_some()
             || assets.artwork.pending()
+            || state.loading
+            || state.launching
+            || state.uninstalling.is_some()
+            || state.deleting_wallpaper.is_some()
+            || state.recents.pending.is_some()
+            || state.weather.fetching()
+            || matches!(
+                state.overlay,
+                Some(Overlay::WallpaperUpload | Overlay::TileEditor)
+            )
         {
+            // Held keys, scripted checks, icons still decoding and any request whose reply
+            // arrives on a channel (inventory, launch, uninstall, weather, updates, wallpaper
+            // upload, tile editor) need a prompt wake so its answer is not sat on.
+            idle_waits = 0;
             8
         } else if !prewarm.is_empty() {
+            idle_waits = 0;
             500
         } else {
-            100
+            // Nothing is pending, so an untouched launcher can sleep longer between polls.
+            // Back off gradually and wake up to a second at most, which still beats every
+            // timer the loop keeps (clock slot, notice expiry, input refresh, wallpaper cycle).
+            // Any event or repaint resets it to the short wait.
+            idle_waits = idle_waits.saturating_add(1);
+            match idle_waits {
+                0..=2 => 100,
+                3..=5 => 250,
+                6..=9 => 500,
+                _ => 1000,
+            }
         };
         queued_event = sdl_events::wait(&mut events, timeout, webos);
     }
