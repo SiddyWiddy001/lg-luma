@@ -826,9 +826,11 @@ fn run() -> Result<(), String> {
     unsafe { gl::GetIntegerv(gl::SAMPLES, &mut samples) };
     eprintln!("Luma GL multisampling: {samples} samples");
     startup_stage("window and GL context");
-    if let Err(error) = video.gl_set_swap_interval(1) {
-        eprintln!("VSync: {error}");
-    }
+    // Whether the display really paces presents. When this succeeds `gl_swap_window` blocks
+    // until the panel refreshes, so the frame loop needs no extra sleep; when SDL refuses, the
+    // swap returns at once and the loop would spin as fast as it can, so it waits out a frame.
+    let vsync = video.gl_set_swap_interval(1).is_ok();
+    eprintln!("Luma vsync: {}", if vsync { "on" } else { "off" });
     let mut renderer =
         renderer::Renderer::new(&assets.root.join("font.ttf"), webos, text_config.embolden)?;
     startup_stage("renderer");
@@ -1982,12 +1984,14 @@ fn run() -> Result<(), String> {
         // decoded need short timed wakes.
         let timeout = if !visible {
             250
-        } else if pill != target
-            || pill_width != target_width
-            || state.animating()
-            || options.profile_frames.is_some()
-        {
+        } else if options.profile_frames.is_some() {
+            // Profiling measures presentations, so it keeps polling and lets the swap pace it.
             0
+        } else if pill != target || pill_width != target_width || state.animating() {
+            // Animation in progress. When the swap blocks on the display this polls for free;
+            // when SDL refused the swap interval it waits out a frame instead of spinning the
+            // CPU at full rate.
+            if vsync { 0 } else { 16 }
         } else if ken_burns {
             // About 30 fps is ample for a 5% pan over half a minute, and keeps the launcher
             // from presenting at full refresh rate forever.
