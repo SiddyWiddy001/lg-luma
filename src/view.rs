@@ -792,7 +792,7 @@ pub fn scene_with_pill(
             // the whole gesture dissolves instead of leaving a hard halo behind.
             out.glow(rect, radius, (1. - t) * 0.7);
             app_face(
-                out,
+                &mut out,
                 assets,
                 app,
                 rect,
