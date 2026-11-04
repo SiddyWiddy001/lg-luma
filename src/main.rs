@@ -353,7 +353,7 @@ fn effects(
                     }
                     if platform.webos {
                         if !animate {
-                            launch_app(&mut state, platform, &id);
+                            launch_app(state, platform, &id);
                         }
                     } else {
                         let title = state
@@ -1811,7 +1811,7 @@ fn run() -> Result<(), String> {
                 if let Some(id) = send {
                     // Most of the way through the flight, ask webOS to open the app: its window
                     // hides shortly after, by which point the icon has nearly faded out.
-                    launch_app(&mut state, platform, &id);
+                    launch_app(&mut state, &platform, &id);
                 }
                 let over = elapsed >= crate::state::LAUNCH_ZOOM;
                 if over {
