@@ -36,12 +36,19 @@ fn upload_sits_left_of_rotation_and_both_remain_fixed_in_every_language() {
             .rect;
         assert!(upload.x >= 640., "{}: {}", language.code(), upload.x);
         assert_eq!(upload.x + upload.w + 20., gradient.x);
-        assert_eq!(gradient.x + gradient.w + 20., cycle.x);
+        let cinematic = before
+            .iter()
+            .find(|c| c.target == Target::WallpaperCinematic)
+            .unwrap()
+            .rect;
+        assert_eq!(gradient.x + gradient.w + 20., cinematic.x);
+        assert_eq!(cinematic.x + cinematic.w + 20., cycle.x);
         assert_eq!(cycle.y, upload.y);
         state.scroll = 500.;
         let after = controls(&state);
         for target in [
             Target::WallpaperCycle,
+            Target::WallpaperCinematic,
             Target::WallpaperGradient,
             Target::UploadWallpaper,
         ] {
@@ -65,11 +72,16 @@ fn cycling_button_toggles_on_off_without_opening_a_page_or_moving_controls() {
     state.direction(Direction::Right, &controls(&state));
     assert_eq!(state.focus, Target::WallpaperGradient);
     state.direction(Direction::Right, &controls(&state));
+    assert_eq!(state.focus, Target::WallpaperCinematic);
+    state.direction(Direction::Right, &controls(&state));
     assert_eq!(state.focus, Target::WallpaperCycle);
+    state.direction(Direction::Left, &controls(&state));
+    assert_eq!(state.focus, Target::WallpaperCinematic);
     state.direction(Direction::Left, &controls(&state));
     assert_eq!(state.focus, Target::WallpaperGradient);
     state.direction(Direction::Left, &controls(&state));
     assert_eq!(state.focus, Target::UploadWallpaper);
+    state.direction(Direction::Right, &controls(&state));
     state.direction(Direction::Right, &controls(&state));
     state.direction(Direction::Right, &controls(&state));
     assert!(!state.preferences.wallpaper_cycle);

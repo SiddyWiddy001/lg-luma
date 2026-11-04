@@ -442,11 +442,15 @@ fn compose(
     now: OffsetDateTime,
 ) -> view::Scene {
     let scene = view::scene_with_pill(state, assets, pill, width, now);
-    if !state.pointer && state.overlay.is_none() && state.reveal_focus(&scene.controls) {
+    let scene = if !state.pointer && state.overlay.is_none() && state.reveal_focus(&scene.controls) {
         view::scene_with_pill(state, assets, pill, width, now)
     } else {
         scene
-    }
+    };
+    // Carry the focused tile's halo destination out of the scene; the frame loop eases
+    // state.halo toward it next frame so the glow slides between apps.
+    state.halo_target = scene.halo_target;
+    scene
 }
 
 fn wallpaper_upload_active(state: &State, webos: bool, focused: bool, visible: bool) -> bool {
@@ -983,7 +987,8 @@ fn run() -> Result<(), String> {
         let ken_burns = visible
             && options.time.is_none()
             && options.screenshot.is_none()
-            && !state.preferences.reduced_motion;
+            && !state.preferences.reduced_motion
+            && state.preferences.cinematic_wallpaper;
         wallpaper_service.set_active(wallpaper_upload_active(&state, webos, focused, visible));
         while let Ok(event) = wallpaper_service.receiver.try_recv() {
             match event {
@@ -1714,6 +1719,91 @@ fn run() -> Result<(), String> {
         }
         if ken_burns {
             state.dirty = true;
+        }
+        // Hover lift and the sliding focus halo ride the same exponential smoothing as the
+        // nav pill above: about 0.15 s to settle, interpolated every frame so a focused icon
+        // eases up instead of snapping, and the halo glides between apps instead of
+        // teleporting. Reduced Motion pins both instantly.
+        let smooth = 1. - (-20. * dt).exp();
+        let focused_app = match &state.focus {
+            Target::App(id) => Some(id.clone()),
+            _ => None,
+        };
+        if state.preferences.reduced_motion {
+            state.app_lift.clear();
+            if let Some(id) = &focused_app {
+                state.app_lift.insert(id.clone(), 1.);
+            }
+            match state.halo_target {
+                Some(([x, y, w, h], radius)) => {
+                    state.halo = Some([x, y, w, h]);
+                    state.halo_radius = radius;
+                    state.halo_alpha = 1.;
+                }
+                None => {
+                    state.halo = None;
+                    state.halo_alpha = 0.;
+                }
+            }
+        } else {
+            let mut animating = false;
+            for (id, value) in &mut state.app_lift {
+                let target = if Some(id.as_str()) == focused_app.as_deref() {
+                    1.
+                } else {
+                    0.
+                };
+                *value += (target - *value) * smooth;
+                if (target - *value).abs() > 0.003 {
+                    animating = true;
+                }
+            }
+            state.app_lift.retain(|id, value| {
+                *value > 0.003 || Some(id.as_str()) == focused_app.as_deref()
+            });
+            match state.halo_target {
+                Some(([tx, ty, tw, th], tr)) => {
+                    if state.halo_alpha < 0.02 {
+                        // Fresh focus: the halo blooms at the focused card, not wherever an
+                        // older one faded out.
+                        state.halo = Some([tx, ty, tw, th]);
+                        state.halo_radius = tr;
+                    } else if let Some(current) = state.halo.as_mut() {
+                        let settle = (current[0] - tx).abs()
+                            + (current[1] - ty).abs()
+                            + (current[2] - tw).abs()
+                            + (current[3] - th).abs()
+                            + (state.halo_radius - tr).abs();
+                        current[0] += (tx - current[0]) * smooth;
+                        current[1] += (ty - current[1]) * smooth;
+                        current[2] += (tw - current[2]) * smooth;
+                        current[3] += (th - current[3]) * smooth;
+                        state.halo_radius += (tr - state.halo_radius) * smooth;
+                        if settle > 0.5 {
+                            animating = true;
+                        }
+                    } else {
+                        state.halo = Some([tx, ty, tw, th]);
+                        state.halo_radius = tr;
+                    }
+                    state.halo_alpha += (1. - state.halo_alpha) * smooth;
+                    if state.halo_alpha < 0.99 {
+                        animating = true;
+                    }
+                }
+                None => {
+                    state.halo_alpha *= 1. - smooth;
+                    if state.halo_alpha > 0.012 {
+                        animating = true;
+                    } else {
+                        state.halo = None;
+                        state.halo_alpha = 0.;
+                    }
+                }
+            }
+            if animating {
+                state.dirty = true;
+            }
         }
         let final_frame = options.frames.is_some_and(|limit| frame + 1 >= limit)
             || (visible

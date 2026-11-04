@@ -14,6 +14,21 @@
     "nl": "Verloop",
     "sv": "Toning"
   },
+  "cinematicBackground": {
+    "en": "Cinematic background",
+    "de": "Kinohintergrund",
+    "es": "Cine",
+    "zh": "电影感背景",
+    "zh-tw": "電影感背景",
+    "pt": "Efeito cinema",
+    "it": "Effetto",
+    "ru": "Кинофон",
+    "pl": "Tło filmowe",
+    "fr": "Effet cinéma",
+    "vi": "Nền điện ảnh",
+    "nl": "Cinema-effect",
+    "sv": "Cineeffekt"
+  },
   "date": {
     "en": "Date",
     "de": "Datum",

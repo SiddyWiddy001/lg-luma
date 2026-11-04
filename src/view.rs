@@ -38,10 +38,10 @@ fn squircle(rect: Rect) -> f32 {
 
 /// The wallpaper's logical rect. Full-screen normally; while idle it eases out to a 5% zoom
 /// after 30 seconds, then back, drifting slightly inside the extra crop so the motion is a
-/// gentle pan as well as a zoom. Reduced Motion keeps it still.
+/// gentle pan as well as a zoom. Reduced Motion or Cinematic Background off keeps it still.
 fn wallpaper_rect(state: &State, now: OffsetDateTime) -> Rect {
     let screen = Rect::new(0., 0., 1920., 1080.);
-    if state.preferences.reduced_motion {
+    if state.preferences.reduced_motion || !state.preferences.cinematic_wallpaper {
         return screen;
     }
     let seconds = now.unix_timestamp_nanos() as f64 / 1e9;
@@ -194,6 +194,8 @@ pub struct Scene {
     pub draw: Vec<Draw>,
     pub controls: Vec<Control>,
     pub modal: Option<Rect>,
+    /// Where the focus halo should slide to, reported by the focused tile this frame.
+    pub halo_target: Option<([f32; 4], f32)>,
 }
 impl Scene {
     fn new() -> Self {
@@ -201,6 +203,7 @@ impl Scene {
             draw: Vec::new(),
             controls: Vec::new(),
             modal: None,
+            halo_target: None,
         }
     }
     fn shape(&mut self, rect: Rect, radius: f32, fill: Color) {
@@ -239,15 +242,16 @@ impl Scene {
             scrollable,
         });
     }
-    fn ring(&mut self, rect: Rect, radius: f32) {
+    fn ring(&mut self, rect: Rect, radius: f32, intensity: f32) {
         // Liquid focus halo: overlapping thin rings outside the card, brightest close to the
         // edge and fading out, so the highlight reads as light behind the glass rather than a
-        // hard stroke. Only the focused card pays for these, so the layers are cheap.
+        // hard stroke. Only the focused card pays for these, so the layers are cheap. The
+        // intensity fades the whole glow while the frame loop slides it between cards.
         let steps = 14;
         for step in 1..=steps {
             let grow = 1.6 + step as f32 * 1.35;
             let falloff = 1. - step as f32 / steps as f32;
-            let alpha = 0.012 + 0.085 * falloff * falloff;
+            let alpha = (0.012 + 0.085 * falloff * falloff) * intensity;
             self.border(
                 rect.inset(-grow),
                 radius + grow,
@@ -256,8 +260,8 @@ impl Scene {
             );
         }
         // A soft inner band and a bright rim sit right against the tile.
-        self.border(rect.inset(-2.6), radius + 2.6, 5.2, c(0xeaf2ff, 0.30));
-        self.border(rect.inset(-1.2), radius + 1.2, 2.4, c(0xffffff, 0.92));
+        self.border(rect.inset(-2.6), radius + 2.6, 5.2, c(0xeaf2ff, 0.30 * intensity));
+        self.border(rect.inset(-1.2), radius + 1.2, 2.4, c(0xffffff, 0.92 * intensity));
     }
     fn shadow(&mut self, rect: Rect, radius: f32, blur: f32, y: f32, alpha: f32) {
         self.draw.push(Draw::Shadow(
@@ -287,6 +291,14 @@ impl Scene {
                 },
             );
             self.border(rect, rect.h / 2., 1., c(0xffffff, 0.07));
+            // Glass edge reflection: light catches the pill's upper edge and fades toward
+            // the bottom, matching the app tiles' glass highlight.
+            self.draw.push(Draw::RoundedGradient(
+                rect,
+                rect.h / 2.,
+                c(0xffffff, 0.09),
+                c(0xffffff, 0.),
+            ));
         }
     }
     fn fade(&mut self, from: usize, alpha: f32, brightness: f32) {
@@ -598,6 +610,15 @@ pub fn scene_with_pill(
         Page::Apps => library(&mut out, state, assets),
         Page::Settings => settings(&mut out, state, assets),
     }
+    // The focus halo is drawn at its animated position rather than the focused card's own
+    // rect, so it slides from one app to the next while the frame loop interpolates state.halo
+    // toward the destination tile() reported last frame.
+    if state.halo_alpha > 0.012 {
+        if let Some([x, y, w, h]) = state.halo {
+            let rect = Rect::new(x, y, w, h);
+            out.ring(rect, state.halo_radius, state.halo_alpha);
+        }
+    }
     if let Some(error) = &state.error
         && !state.inventory.apps.is_empty()
         && !out
@@ -860,11 +881,30 @@ fn tile(
     }
     let start = out.draw.len();
     let focused = state.focus == Target::App(app.id.clone());
-    let radius = squircle(rect);
+    // Hover lift: the frame loop eases this 0..1 value, so the plate and artwork grow to a
+    // 5% larger footprint and brighten slightly while focused, then settle back on blur.
+    let lift = state.app_lift.get(&app.id).copied().unwrap_or(0.);
+    let face = if lift > 0.002 {
+        let scale = 1. + 0.05 * lift;
+        let (cx, cy) = rect.center();
+        Rect::new(
+            cx - rect.w * scale / 2.,
+            cy - rect.h * scale / 2.,
+            rect.w * scale,
+            rect.h * scale,
+        )
+    } else {
+        rect
+    };
+    let radius = squircle(face);
+    if focused {
+        // Report the halo's destination (the lifted face) for the sliding focus glow.
+        out.halo_target = Some(([face.x, face.y, face.w, face.h], radius));
+    }
     // The shadow is only painted outside the face, so it keeps depth under the
     // translucent glass plate without darkening the plate itself.
     out.shadow(
-        rect,
+        face,
         radius,
         if focused { 34. } else { 22. },
         if focused { 14. } else { 9. },
@@ -874,12 +914,13 @@ fn tile(
         out,
         assets,
         app,
-        rect,
+        face,
         state.preferences.language,
         radius,
+        lift,
     );
     if pinned {
-        favorite_badge(out, assets, rect, favorite_color);
+        favorite_badge(out, assets, face, favorite_color);
     }
     if state.moving.as_ref() == Some(&app.id) {
         let indicator = Rect::new(
@@ -901,9 +942,6 @@ fn tile(
             Rect::new(indicator.x + 40., indicator.y + 4., 16., 16.),
             c(0xededed, 1.),
         );
-    }
-    if focused {
-        out.ring(rect, radius);
     }
     if state.page == Page::Apps && state.filter == 5 {
         out.fade(start, 0.45, 1.);
@@ -964,6 +1002,7 @@ fn app_face(
     rect: Rect,
     language: Language,
     radius: f32,
+    lift: f32,
 ) -> Color {
     let logo = crate::branding::for_key(&app.brand);
     let artwork = logo
@@ -982,15 +1021,30 @@ fn app_face(
     // Apps with no artwork keep the opaque generic surface instead, because its white mark
     // needs a dark backdrop to stay legible.
     if installed || logo.is_some() {
-        out.draw.push(Draw::RoundedGradient(
-            rect,
-            radius,
-            c(0x2c3641, 0.70),
-            c(0x0e1318, 0.60),
-        ));
+        // The lift brightens the plate a touch along with the icon, capped so a focused
+        // tile never blows out the smoked-glass tone.
+        let warm = 1. + 0.10 * lift;
+        let mut top = c(0x2c3641, 0.70);
+        let mut bottom = c(0x0e1318, 0.60);
+        for channel in &mut top[..3] {
+            *channel *= warm;
+        }
+        for channel in &mut bottom[..3] {
+            *channel *= warm;
+        }
+        out.draw.push(Draw::RoundedGradient(rect, radius, top, bottom));
         out.border(rect, radius, 3., c(0xffffff, 0.06));
         out.border(rect, radius, 1., c(0xffffff, 0.24));
     }
+    // Glass edge reflection: a bright highlight along the top of the tile that fades toward
+    // the bottom, as if the glass plate were catching light from the room above it.
+    out.draw.push(Draw::RoundedGradient(
+        rect,
+        radius,
+        c(0xffffff, 0.09 + 0.05 * lift),
+        c(0xffffff, 0.),
+    ));
+    let art_start = out.draw.len();
     if let Some(image) = artwork {
         // Inset so the glass shows around the icon; the icon keeps its own alpha here.
         out.draw.push(Draw::AppIcon(image, rect.inset(rect.h * 0.11), [1.; 4]));
@@ -1011,6 +1065,11 @@ fn app_face(
         );
     } else if !installed {
         brand_mark(out, assets, app, rect, language);
+    }
+    if lift > 0.002 {
+        // A focused icon brightens slightly as it lifts; the artwork layers only, so the
+        // plate keeps its settled base tone and the reflection stays subtle.
+        out.fade(art_start, 1., 1. + 0.06 * lift);
     }
     favorite_color
 }
@@ -1387,7 +1446,7 @@ fn home(out: &mut Scene, state: &State, assets: &Assets, now: OffsetDateTime) {
             false,
         );
         if focused {
-            out.ring(rect, 18.4);
+            out.ring(rect, 18.4, 1.);
         }
         out.control(Target::Input(input.id.clone()), rect, true);
     }
@@ -1825,7 +1884,7 @@ fn row(out: &mut Scene, state: &State, assets: &Assets, row: Row<'_>) {
         };
     let compact_value_width = matches!(
         row.target,
-        Target::WallpaperCycle | Target::WallpaperGradient
+        Target::WallpaperCycle | Target::WallpaperGradient | Target::WallpaperCinematic
     )
     .then(|| rotation_value_width(assets, state.preferences.language));
     let right_inset = if let Some(width) = compact_value_width {
@@ -1906,7 +1965,10 @@ fn row(out: &mut Scene, state: &State, assets: &Assets, row: Row<'_>) {
     }
     let scrollable = !matches!(
         row.target,
-        Target::UploadWallpaper | Target::WallpaperCycle | Target::WallpaperGradient
+        Target::UploadWallpaper
+            | Target::WallpaperCycle
+            | Target::WallpaperGradient
+            | Target::WallpaperCinematic
     );
     out.control(row.target, row.rect, scrollable);
 }
@@ -2457,11 +2519,17 @@ fn settings_content(out: &mut Scene, state: &State, assets: &Assets) {
                 .min(520.);
             let cycle_label = language.t("wallpaperCycle");
             let gradient_label = language.t("wallpaperGradient");
+            let cinematic_label = language.t("cinematicBackground");
             let gradient_width = (assets.width(gradient_label, text(20.8, 550, -0.02))
                 + rotation_value_width(assets, language)
                 + 111.6)
                 .ceil()
                 .min(360.);
+            let cinematic_width = (assets.width(cinematic_label, text(20.8, 550, -0.02))
+                + rotation_value_width(assets, language)
+                + 111.6)
+                .ceil()
+                .min(430.);
             let cycle_width = (assets.width(cycle_label, text(20.8, 550, -0.02))
                 + rotation_value_width(assets, language)
                 + 111.6)
@@ -2497,7 +2565,7 @@ fn settings_content(out: &mut Scene, state: &State, assets: &Assets) {
                 Row {
                     target: Target::WallpaperGradient,
                     rect: Rect::new(
-                        1760. - cycle_width - 20. - gradient_width,
+                        1760. - cycle_width - 40. - cinematic_width - gradient_width,
                         164.8,
                         gradient_width,
                         64.,
@@ -2523,9 +2591,33 @@ fn settings_content(out: &mut Scene, state: &State, assets: &Assets) {
                 state,
                 assets,
                 Row {
+                    target: Target::WallpaperCinematic,
+                    rect: Rect::new(
+                        1760. - cycle_width - 20. - cinematic_width,
+                        164.8,
+                        cinematic_width,
+                        64.,
+                    ),
+                    title: cinematic_label,
+                    icon: Some("sparkles"),
+                    value: Some(language.t(if state.preferences.cinematic_wallpaper {
+                        "stateOn"
+                    } else {
+                        "stateOff"
+                    })),
+                    description: None,
+                    selected: false,
+                    chevron: false,
+                },
+            );
+            row(
+                out,
+                state,
+                assets,
+                Row {
                     target: Target::UploadWallpaper,
                     rect: Rect::new(
-                        1760. - cycle_width - 40. - gradient_width - upload_width,
+                        1760. - cycle_width - 60. - cinematic_width - gradient_width - upload_width,
                         164.8,
                         upload_width,
                         64.,
@@ -2568,7 +2660,7 @@ fn settings_content(out: &mut Scene, state: &State, assets: &Assets) {
                     out.icon(assets, "check", check.inset(3.6), c(0x333333, 1.));
                 }
                 if state.focus == Target::Background(index) {
-                    out.ring(rect, 16.);
+                    out.ring(rect, 16., 1.);
                 }
                 out.control(Target::Background(index), rect, true);
             }
@@ -3257,7 +3349,7 @@ fn options(out: &mut Scene, state: &State, assets: &Assets, id: &str, anchor: Op
         out.image(path, card, 16., false);
         out.border(card, 16., 1., c(0xffffff, 0.086));
     } else if let Some(app) = app.filter(|_| !shortcut) {
-        let favorite_color = app_face(out, assets, app, card, language, squircle(card));
+        let favorite_color = app_face(out, assets, app, card, language, squircle(card), 0.);
         if favorite {
             favorite_badge(out, assets, card, favorite_color);
         }

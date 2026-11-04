@@ -6,6 +6,7 @@ use crate::model::{
 use crate::text_rendering::TextRendering;
 use crate::weather::{self, Unit};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 pub const WIDGETS_SECTION: usize = 2;
@@ -74,6 +75,7 @@ pub enum Target {
     UploadWallpaper,
     WallpaperCycle,
     WallpaperGradient,
+    WallpaperCinematic,
     UseBackground,
     DeleteBackground,
     InputMode(String),
@@ -248,6 +250,17 @@ pub struct State {
     pub greeting_name_draft: String,
     pub input_name: String,
     pub recents: crate::recents::Recents,
+    /// Per-app hover lift (0..1), eased toward 1 for the focused card each frame by the
+    /// frame loop, so a focused icon rises smoothly instead of snapping.
+    pub app_lift: HashMap<String, f32>,
+    /// The focus halo's animated rect ([x, y, w, h]), corner radius and intensity. The
+    /// frame loop slides them toward the focused card so the glow glides between apps
+    /// instead of teleporting.
+    pub halo: Option<[f32; 4]>,
+    pub halo_radius: f32,
+    pub halo_alpha: f32,
+    /// Where the halo wants to be, carried out of the last composed scene by `compose`.
+    pub halo_target: Option<([f32; 4], f32)>,
 }
 
 impl State {
@@ -291,6 +304,11 @@ impl State {
             greeting_name_draft: String::new(),
             input_name: String::new(),
             recents: crate::recents::Recents::default(),
+            app_lift: HashMap::new(),
+            halo: None,
+            halo_radius: 0.,
+            halo_alpha: 0.,
+            halo_target: None,
         }
     }
 
@@ -1449,8 +1467,20 @@ impl State {
             }
             if self.focus == Target::WallpaperGradient {
                 match direction {
-                    Direction::Right => self.focus(Target::WallpaperCycle, controls),
+                    Direction::Right => self.focus(Target::WallpaperCinematic, controls),
                     Direction::Left => self.focus(Target::UploadWallpaper, controls),
+                    Direction::Up => self.focus(Target::Nav(2), controls),
+                    Direction::Down => self.focus(
+                        Target::Background(1.min(self.background_count().saturating_sub(1))),
+                        controls,
+                    ),
+                }
+                return vec![];
+            }
+            if self.focus == Target::WallpaperCinematic {
+                match direction {
+                    Direction::Right => self.focus(Target::WallpaperCycle, controls),
+                    Direction::Left => self.focus(Target::WallpaperGradient, controls),
                     Direction::Up => self.focus(Target::Nav(2), controls),
                     Direction::Down => self.focus(
                         Target::Background(1.min(self.background_count().saturating_sub(1))),
@@ -1462,7 +1492,7 @@ impl State {
             if self.focus == Target::WallpaperCycle {
                 match direction {
                     Direction::Right => {}
-                    Direction::Left => self.focus(Target::WallpaperGradient, controls),
+                    Direction::Left => self.focus(Target::WallpaperCinematic, controls),
                     Direction::Up => self.focus(Target::Nav(2), controls),
                     Direction::Down => self.focus(
                         Target::Background(2.min(self.background_count().saturating_sub(1))),
@@ -2218,6 +2248,10 @@ impl State {
             }
             Target::WallpaperGradient => {
                 self.preferences.wallpaper_gradient = !self.preferences.wallpaper_gradient;
+                return vec![Effect::Save];
+            }
+            Target::WallpaperCinematic => {
+                self.preferences.cinematic_wallpaper = !self.preferences.cinematic_wallpaper;
                 return vec![Effect::Save];
             }
             Target::UseBackground => {

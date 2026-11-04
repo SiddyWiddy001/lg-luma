@@ -1031,7 +1031,11 @@ fn background_sidebar_right_focuses_upload_and_ok_restores_the_applied_backgroun
     state.direction(Direction::Right, &controls(&state));
     assert_eq!(state.focus, Target::WallpaperGradient);
     state.direction(Direction::Right, &controls(&state));
+    assert_eq!(state.focus, Target::WallpaperCinematic);
+    state.direction(Direction::Right, &controls(&state));
     assert_eq!(state.focus, Target::WallpaperCycle);
+    state.direction(Direction::Left, &controls(&state));
+    assert_eq!(state.focus, Target::WallpaperCinematic);
     state.direction(Direction::Left, &controls(&state));
     assert_eq!(state.focus, Target::WallpaperGradient);
     state.direction(Direction::Left, &controls(&state));

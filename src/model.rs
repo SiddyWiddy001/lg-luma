@@ -249,6 +249,9 @@ pub struct Preferences {
     #[serde(deserialize_with = "crate::wallpaper_cycle::deserialize")]
     pub wallpaper_cycle: bool,
     pub wallpaper_gradient: bool,
+    /// Slow Ken Burns drift on the wallpaper. Off keeps the splash perfectly still and lets the
+    /// idle frame stop repainting it, which saves GPU work and heat.
+    pub cinematic_wallpaper: bool,
     /// Unix seconds of the last automatic or chosen wallpaper change, for the timed modes.
     pub wallpaper_changed: u64,
 }
@@ -280,6 +283,7 @@ impl Default for Preferences {
             text_rendering: crate::text_rendering::TextRendering::default(),
             wallpaper_cycle: false,
             wallpaper_gradient: true,
+            cinematic_wallpaper: true,
             wallpaper_changed: 0,
         }
     }
