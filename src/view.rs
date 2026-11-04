@@ -253,14 +253,15 @@ impl Scene {
     }
     /// Focus bloom behind a card: filled rounded shapes that expand outward and fade, so
     /// light bleeds from behind the glass. The tile is painted over them, leaving only the
-    /// halo outside its edges: a soft glow rather than a hard outline that teleports.
+    /// halo outside its edges: a soft glow rather than a hard outline that teleports. The
+    /// focused card is drawn last by the page, so no neighbouring tile paints over this.
     fn glow(&mut self, rect: Rect, radius: f32, intensity: f32) {
         for (grow, alpha) in [
-            (4., 0.16),
-            (9., 0.11),
-            (15., 0.075),
-            (23., 0.05),
-            (34., 0.03),
+            (6., 0.24),
+            (12., 0.165),
+            (20., 0.105),
+            (30., 0.06),
+            (42., 0.038),
         ] {
             self.shape(rect.inset(-grow), radius + grow, c(0xe8eef8, alpha * intensity));
         }
@@ -1404,7 +1405,10 @@ fn home(out: &mut Scene, state: &State, assets: &Assets, now: OffsetDateTime) {
         HOME_STRIP_RIGHT,
         HOME_FADE_RIGHT,
     ])));
-    for (index, app) in apps.iter().enumerate() {
+    // The focused card is painted last: its bloom bleeds out from behind the tile, and a tile
+    // drawn afterwards would paint straight over that halo. Nothing else in this clip cares
+    // about order, and focus/hit tests look targets up by id rather than by draw order.
+    let draw_tile = |out: &mut Scene, index: usize, app: &App| {
         tile(
             out,
             state,
@@ -1419,6 +1423,17 @@ fn home(out: &mut Scene, state: &State, assets: &Assets, now: OffsetDateTime) {
             names,
             false,
         );
+    };
+    let mut focused: Option<(usize, &App)> = None;
+    for (index, app) in apps.iter().enumerate() {
+        if state.focus == Target::App(app.id.clone()) {
+            focused = Some((index, app));
+            continue;
+        }
+        draw_tile(out, index, app);
+    }
+    if let Some((index, app)) = focused {
+        draw_tile(out, index, app);
     }
     out.draw.push(Draw::EdgeFadeX(None));
     out.draw.push(Draw::Clip(Some(state.content_viewport())));
@@ -1817,6 +1832,19 @@ fn library_grid(out: &mut Scene, state: &State, assets: &Assets) {
     }
     let mut y = 270.4;
     let names = state.preferences.show_app_names;
+    // Same as the Home strip: the focused card goes last so its bloom stays visible.
+    let draw_tile = |out: &mut Scene, app: &App, rect: Rect| {
+        tile(
+            out,
+            state,
+            assets,
+            app,
+            rect,
+            names,
+            favorites.contains(&app.id),
+        );
+    };
+    let mut focused: Option<(&App, Rect)> = None;
     for row in apps.chunks(APPS_COLUMNS) {
         let row_height = FACE_HEIGHT
             + if names {
@@ -1828,17 +1856,17 @@ fn library_grid(out: &mut Scene, state: &State, assets: &Assets) {
                 0.
             };
         for (column, app) in row.iter().enumerate() {
-            tile(
-                out,
-                state,
-                assets,
-                app,
-                Rect::new(84. + column as f32 * GRID_PITCH, y - s, 270., FACE_HEIGHT),
-                names,
-                favorites.contains(&app.id),
-            );
+            let rect = Rect::new(84. + column as f32 * GRID_PITCH, y - s, 270., FACE_HEIGHT);
+            if state.focus == Target::App(app.id.clone()) {
+                focused = Some((app, rect));
+                continue;
+            }
+            draw_tile(out, app, rect);
         }
         y += row_height + 38.4;
+    }
+    if let Some((app, rect)) = focused {
+        draw_tile(out, app, rect);
     }
 }
 

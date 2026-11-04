@@ -290,6 +290,15 @@ impl BackButton {
     }
 }
 
+/// Asks webOS to open an app. Kept separate from `effects` because the launch zoom defers it:
+/// webOS hides Home as soon as the app surface appears, which would cut the animation short, so
+/// the frame loop calls this once the icon has mostly flown out of the card.
+fn launch_app(state: &mut State, platform: &Platform, id: &str) {
+    state.launching = true;
+    state.notify(state.preferences.language.t("opening"));
+    platform.send(Request::Launch(id.to_string()));
+}
+
 #[allow(clippy::too_many_arguments)]
 fn effects(
     effects: Vec<Effect>,
@@ -324,20 +333,28 @@ fn effects(
                     state.notify(state.preferences.language.t("scrollTestOnly"));
                     continue;
                 }
-                if !state.launching {
-                    if !state.preferences.reduced_motion {
-                        // The icon flies out of the card while the app starts, from whatever
-                        // size the press had squeezed it to. The frame loop keeps repainting.
+                if !state.launching && state.launch_zoom.is_none() {
+                    // The zoom needs a card whose artwork Luma can actually draw; TV shortcuts
+                    // have no tile to fly out of, so they launch straight away.
+                    let animate = !state.preferences.reduced_motion
+                        && state.inventory.apps.iter().any(|app| app.id == id);
+                    if animate {
+                        // The icon flies out of the card, from whatever size the press had
+                        // squeezed it to. On TV the webOS request is deliberately held back:
+                        // opening an app hides Home, and a hidden window presents nothing, so
+                        // sending it here would erase the frame before the zoom is ever seen.
+                        // The frame loop sends it once the icon has mostly flown out.
                         state.launch_zoom = Some(crate::state::LaunchZoom {
                             app: id.clone(),
                             started: Instant::now(),
+                            sent: false,
                         });
                         state.dirty = true;
                     }
                     if platform.webos {
-                        state.launching = true;
-                        state.notify(state.preferences.language.t("opening"));
-                        platform.send(Request::Launch(id));
+                        if !animate {
+                            launch_app(&mut state, platform, &id);
+                        }
                     } else {
                         let title = state
                             .inventory
@@ -1745,6 +1762,11 @@ fn run() -> Result<(), String> {
             state.press_depth = if holding { 1. } else { 0. };
         } else {
             let mut animating = false;
+            if let Some(id) = &focused_app {
+                // The focused card needs an entry to ramp from: without it the map stays empty
+                // on a TV, and nothing below would ever lift, bloom or squeeze.
+                state.app_lift.entry(id.clone()).or_default();
+            }
             for (id, value) in &mut state.app_lift {
                 let target = if Some(id.as_str()) == focused_app.as_deref() {
                     1.
@@ -1773,9 +1795,25 @@ fn run() -> Result<(), String> {
             if state.launch_zoom.is_some() {
                 // Repaint every frame while the icon grows and fades, then drop it and let the
                 // tile ease back out in case the launch never took over the screen.
-                let over = state.launch_zoom.as_ref().is_some_and(|zoom| {
-                    zoom.started.elapsed().as_secs_f32() >= crate::state::LAUNCH_ZOOM
-                });
+                let elapsed = state
+                    .launch_zoom
+                    .as_ref()
+                    .map_or(0., |zoom| zoom.started.elapsed().as_secs_f32());
+                let mut send: Option<String> = None;
+                if platform.webos && elapsed >= crate::state::LAUNCH_ZOOM * 0.7 {
+                    if let Some(zoom) = state.launch_zoom.as_mut()
+                        && !zoom.sent
+                    {
+                        zoom.sent = true;
+                        send = Some(zoom.app.clone());
+                    }
+                }
+                if let Some(id) = send {
+                    // Most of the way through the flight, ask webOS to open the app: its window
+                    // hides shortly after, by which point the icon has nearly faded out.
+                    launch_app(&mut state, platform, &id);
+                }
+                let over = elapsed >= crate::state::LAUNCH_ZOOM;
                 if over {
                     state.launch_zoom = None;
                 }

@@ -214,6 +214,7 @@ pub const KEYS: [&str; 40] = [
 pub struct LaunchZoom {
     pub app: String,
     pub started: Instant,
+    pub sent: bool,
 }
 
 /// Seconds the launch icon takes to grow from the card and fade away.
