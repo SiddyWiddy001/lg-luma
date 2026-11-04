@@ -899,13 +899,12 @@ fn tile(
     app: &App,
     rect: Rect,
     names: bool,
+    caption: f32,
     pinned: bool,
 ) {
-    let caption_height = if names {
-        caption_height(state, assets, app, rect.w)
-    } else {
-        0.
-    };
+    // Caption height is measured once per app by the caller that lays the grid out; measuring
+    // it again here would run the word-wrap pass a second time for every visible tile.
+    let caption_height = if names { caption } else { 0. };
     let label_height = if names { 18.4 + caption_height } else { 0. };
     out.control(
         Target::App(app.id.clone()),
@@ -1380,13 +1379,18 @@ fn home(out: &mut Scene, state: &State, assets: &Assets, now: OffsetDateTime) {
         );
         grid_height = 247.5;
     }
+    // Measure every caption once: the grid height and each tile otherwise both run the wrap.
+    let captions: Vec<f32> = if names {
+        apps.iter()
+            .map(|app| caption_height(state, assets, app, HOME_TILE_WIDTH))
+            .collect()
+    } else {
+        Vec::new()
+    };
     if !apps.is_empty() {
         grid_height = FACE_HEIGHT
             + if names {
-                18.4 + apps
-                    .iter()
-                    .map(|app| caption_height(state, assets, app, HOME_TILE_WIDTH))
-                    .fold(58.24, f32::max)
+                18.4 + captions.iter().copied().fold(58.24, f32::max)
             } else {
                 0.
             };
@@ -1423,6 +1427,7 @@ fn home(out: &mut Scene, state: &State, assets: &Assets, now: OffsetDateTime) {
                 FACE_HEIGHT,
             ),
             names,
+            captions.get(index).copied().unwrap_or(0.),
             false,
         );
     };
@@ -1835,7 +1840,7 @@ fn library_grid(out: &mut Scene, state: &State, assets: &Assets) {
     let mut y = 270.4;
     let names = state.preferences.show_app_names;
     // Same as the Home strip: the focused card goes last so its bloom stays visible.
-    let draw_tile = |out: &mut Scene, app: &App, rect: Rect| {
+    let draw_tile = |out: &mut Scene, app: &App, rect: Rect, caption: f32| {
         tile(
             out,
             state,
@@ -1843,32 +1848,39 @@ fn library_grid(out: &mut Scene, state: &State, assets: &Assets) {
             app,
             rect,
             names,
+            caption,
             favorites.contains(&app.id),
         );
     };
-    let mut focused: Option<(&App, Rect)> = None;
+    let mut focused: Option<(&App, Rect, f32)> = None;
     for row in apps.chunks(APPS_COLUMNS) {
+        // Measure each caption once for the row instead of again for every tile that wraps it.
+        let captions: Vec<f32> = if names {
+            row.iter()
+                .map(|app| caption_height(state, assets, app, 270.))
+                .collect()
+        } else {
+            Vec::new()
+        };
         let row_height = FACE_HEIGHT
             + if names {
-                18.4 + row
-                    .iter()
-                    .map(|app| caption_height(state, assets, app, 270.))
-                    .fold(58.24, f32::max)
+                18.4 + captions.iter().copied().fold(58.24, f32::max)
             } else {
                 0.
             };
         for (column, app) in row.iter().enumerate() {
             let rect = Rect::new(84. + column as f32 * GRID_PITCH, y - s, 270., FACE_HEIGHT);
+            let caption = captions.get(column).copied().unwrap_or(0.);
             if state.focus == Target::App(app.id.clone()) {
-                focused = Some((app, rect));
+                focused = Some((app, rect, caption));
                 continue;
             }
-            draw_tile(out, app, rect);
+            draw_tile(out, app, rect, caption);
         }
         y += row_height + 38.4;
     }
-    if let Some((app, rect)) = focused {
-        draw_tile(out, app, rect);
+    if let Some((app, rect, caption)) = focused {
+        draw_tile(out, app, rect, caption);
     }
 }
 
