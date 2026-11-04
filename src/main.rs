@@ -978,6 +978,12 @@ fn run() -> Result<(), String> {
             state.dirty = true;
         }
         state.tick();
+        // Ken Burns needs a live clock and a visible window. Previews pinned with --time or
+        // --screenshot stay deterministic and still.
+        let ken_burns = visible
+            && options.time.is_none()
+            && options.screenshot.is_none()
+            && !state.preferences.reduced_motion;
         wallpaper_service.set_active(wallpaper_upload_active(&state, webos, focused, visible));
         while let Ok(event) = wallpaper_service.receiver.try_recv() {
             match event {
@@ -1706,6 +1712,9 @@ fn run() -> Result<(), String> {
             pill_width += (target_width - pill_width) * (1. - (-20. * dt).exp());
             state.dirty = true;
         }
+        if ken_burns {
+            state.dirty = true;
+        }
         let final_frame = options.frames.is_some_and(|limit| frame + 1 >= limit)
             || (visible
                 && options
@@ -1871,6 +1880,10 @@ fn run() -> Result<(), String> {
             || options.profile_frames.is_some()
         {
             0
+        } else if ken_burns {
+            // About 30 fps is ample for a 5% pan over half a minute, and keeps the launcher
+            // from presenting at full refresh rate forever.
+            33
         } else if press.is_some()
             || back_button.press.is_some()
             || options.frames.is_some()

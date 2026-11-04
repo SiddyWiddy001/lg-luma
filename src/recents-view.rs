@@ -104,7 +104,7 @@ pub fn render(out: &mut Scene, state: &State, assets: &Assets) {
             let start = out.draw.len();
             let target = Target::Recent(entry.app.id.clone());
             let focused = *focus == target;
-            let radius = 26. * rect.w / 900.;
+            let radius = 34. * rect.w / 900.;
             let prominence = (1. - depth).clamp(0., 1.);
             let app = state
                 .inventory
@@ -114,14 +114,10 @@ pub fn render(out: &mut Scene, state: &State, assets: &Assets) {
                 .unwrap_or(&entry.app);
             out.shadow(rect, radius, 48., 22., 0.28 + 0.27 * prominence);
             app_face(out, assets, app, rect, language, radius);
-            out.border(
-                rect,
-                radius,
-                if focused { 3. } else { 1. },
-                c(0xffffff, if focused { 0.85 } else { 0.16 }),
-            );
             if focused {
-                out.border(rect.inset(-6.), radius + 6., 2., c(0xffffff, 0.10));
+                out.ring(rect, radius);
+            } else {
+                out.border(rect, radius, 1., c(0xffffff, 0.16));
             }
             // An exiting card is presentation-only, never a moving hit target.
             if dismissal.is_none() {

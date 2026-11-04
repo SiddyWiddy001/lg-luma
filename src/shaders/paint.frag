@@ -5,6 +5,7 @@ uniform vec4 u_edge_fade_x;
 uniform vec3 u_app_top;
 uniform vec3 u_app_bottom;
 uniform bool u_app;
+uniform float u_icon_tint;
 varying PAINT_PRECISION vec2 v_uv;
 varying PAINT_PRECISION vec4 v_color;
 varying PAINT_PRECISION vec4 v_shape;
@@ -52,6 +53,13 @@ void main() {
         float inside = step(0.0, v_uv.x) * step(v_uv.x, 1.0) *
             step(0.0, v_uv.y) * step(v_uv.y, 1.0);
         color = vec4(mix(background, color.rgb, color.a * inside), 1.0);
+    }
+    if (u_icon_tint > 0.0) {
+        // Cool monochrome for installed icons: luma drives a dark-mode ramp from near
+        // black to a soft highlight, so every tile reads as part of the same glass set.
+        float luma = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
+        vec3 mono = vec3(luma) * vec3(0.82, 0.86, 0.93);
+        color.rgb = mix(color.rgb, mono, u_icon_tint);
     }
     gl_FragColor = color * v_color * vec4(1.0, 1.0, 1.0, alpha * edge_coverage());
 }

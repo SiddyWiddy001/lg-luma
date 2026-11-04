@@ -20,9 +20,39 @@ const MAIN_TOP: f32 = 108.8;
 const FACE_HEIGHT: f32 = 154.4;
 const GRID_PITCH: f32 = 296.4;
 const RECENTS_BACKDROP_OPACITY: f32 = 0.86;
+/// Corner radius as a fraction of the shorter side. Larger than iOS's 0.223 so the
+/// shader's rounded-rectangle field reads as a smooth squircle at TV distance.
+const SQUIRCLE_RADIUS: f32 = 0.30;
+/// Ken Burns: the wallpaper reaches 5% zoom after 30 s, then eases back out.
+const KEN_BURNS_ZOOM: f32 = 0.05;
+const KEN_BURNS_PERIOD: f64 = 60.;
 
 #[path = "recents-view.rs"]
 mod recents_view;
+
+/// Icon plates and tile backgrounds share one radius: a fraction of the shorter side large
+/// enough to read as a squircle rather than a plain rounded rectangle.
+fn squircle(rect: Rect) -> f32 {
+    rect.w.min(rect.h) * SQUIRCLE_RADIUS
+}
+
+/// The wallpaper's logical rect. Full-screen normally; while idle it eases out to a 5% zoom
+/// after 30 seconds, then back, drifting slightly inside the extra crop so the motion is a
+/// gentle pan as well as a zoom. Reduced Motion keeps it still.
+fn wallpaper_rect(state: &State, now: OffsetDateTime) -> Rect {
+    let screen = Rect::new(0., 0., 1920., 1080.);
+    if state.preferences.reduced_motion {
+        return screen;
+    }
+    let seconds = now.unix_timestamp_nanos() as f64 / 1e9;
+    let cycle = std::f64::consts::TAU * seconds / KEN_BURNS_PERIOD;
+    let zoom = 1. + KEN_BURNS_ZOOM * (0.5 - 0.5 * cycle.cos()) as f32;
+    let (w, h) = (1920. * zoom, 1080. * zoom);
+    // Only drift into the margin the zoom itself creates, so no edge is ever exposed.
+    let x = (1920. - w) / 2. + (w - 1920.) / 2. * 0.45 * (cycle * 0.7).sin() as f32;
+    let y = (1080. - h) / 2. + (h - 1080.) / 2. * 0.35 * (cycle * 0.55 + 1.).cos() as f32;
+    Rect::new(x, y, w, h)
+}
 
 pub struct Assets {
     pub root: PathBuf,
@@ -210,8 +240,24 @@ impl Scene {
         });
     }
     fn ring(&mut self, rect: Rect, radius: f32) {
-        self.border(rect.inset(-6.9), radius + 6.9, 3.7, c(0xffffff, 0.10));
-        self.border(rect.inset(-3.2), radius + 3.2, 3.2, c(0xf0f0f0, 1.));
+        // Liquid focus halo: overlapping thin rings outside the card, brightest close to the
+        // edge and fading out, so the highlight reads as light behind the glass rather than a
+        // hard stroke. Only the focused card pays for these, so the layers are cheap.
+        let steps = 14;
+        for step in 1..=steps {
+            let grow = 1.6 + step as f32 * 1.35;
+            let falloff = 1. - step as f32 / steps as f32;
+            let alpha = 0.012 + 0.085 * falloff * falloff;
+            self.border(
+                rect.inset(-grow),
+                radius + grow,
+                2.9,
+                c(0xdfe9ff, alpha),
+            );
+        }
+        // A soft inner band and a bright rim sit right against the tile.
+        self.border(rect.inset(-2.6), radius + 2.6, 5.2, c(0xeaf2ff, 0.30));
+        self.border(rect.inset(-1.2), radius + 1.2, 2.4, c(0xffffff, 0.92));
     }
     fn shadow(&mut self, rect: Rect, radius: f32, blur: f32, y: f32, alpha: f32) {
         self.draw.push(Draw::Shadow(
@@ -510,17 +556,13 @@ pub fn scene_with_pill(
     now: OffsetDateTime,
 ) -> Scene {
     let mut out = Scene::new();
+    let wallpaper = wallpaper_rect(state, now);
     if let Some((previous, start)) = &state.previous_background {
-        out.image(
-            assets.background(state, previous),
-            Rect::new(0., 0., 1920., 1080.),
-            0.,
-            false,
-        );
+        out.image(assets.background(state, previous), wallpaper, 0., false);
         let alpha = (start.elapsed().as_secs_f32() / state.background_fade).min(1.);
         out.draw.push(Draw::TintedImage(
             assets.background(state, &state.preferences.background),
-            Rect::new(0., 0., 1920., 1080.),
+            wallpaper,
             0.,
             false,
             [1., 1., 1., alpha],
@@ -528,7 +570,7 @@ pub fn scene_with_pill(
     } else {
         out.image(
             assets.background(state, &state.preferences.background),
-            Rect::new(0., 0., 1920., 1080.),
+            wallpaper,
             0.,
             false,
         );
@@ -818,16 +860,24 @@ fn tile(
     }
     let start = out.draw.len();
     let focused = state.focus == Target::App(app.id.clone());
+    let radius = squircle(rect);
     // The shadow is only painted outside the face, so it keeps depth under the
     // translucent glass plate without darkening the plate itself.
     out.shadow(
         rect,
-        19.2,
+        radius,
         if focused { 34. } else { 22. },
         if focused { 14. } else { 9. },
         if focused { 0.4 } else { 0.165 },
     );
-    let favorite_color = app_face(out, assets, app, rect, state.preferences.language, 19.2);
+    let favorite_color = app_face(
+        out,
+        assets,
+        app,
+        rect,
+        state.preferences.language,
+        radius,
+    );
     if pinned {
         favorite_badge(out, assets, rect, favorite_color);
     }
@@ -853,7 +903,7 @@ fn tile(
         );
     }
     if focused {
-        out.ring(rect, 19.2);
+        out.ring(rect, radius);
     }
     if state.page == Page::Apps && state.filter == 5 {
         out.fade(start, 0.45, 1.);
@@ -924,30 +974,22 @@ fn app_face(
                 .and_then(|source| assets.artwork.get(source))
         })
         .flatten();
-    // The heart's centre is 19.2px below the top, outside the inset installed icon.
-    // Bundled and generic surfaces are dark, so their badge remains white.
-    let favorite_color = if artwork
-        .as_ref()
-        .is_some_and(|image| image.dark_badge(19.2 / rect.h))
-    {
-        c(0x000000, 1.)
-    } else {
-        c(0xffffff, 1.)
-    };
+    // The plate is dark smoked glass under every icon, so the favourite badge stays white.
+    let favorite_color = c(0xffffff, 1.);
     let installed = artwork.is_some();
-    // A translucent tvOS-style plate under real artwork: a light milky haze that lifts the
-    // wallpaper behind it, a wide soft glow and a crisp rim catching the light. Apps with no
-    // artwork keep the opaque generic surface instead, because its white mark needs a dark
-    // backdrop to stay legible.
+    // A dark tvOS-style plate under real artwork: smoked glass that lets the monochrome icon
+    // settle into the wallpaper, a wide soft inner glow and a crisp rim catching the light.
+    // Apps with no artwork keep the opaque generic surface instead, because its white mark
+    // needs a dark backdrop to stay legible.
     if installed || logo.is_some() {
         out.draw.push(Draw::RoundedGradient(
             rect,
             radius,
-            c(0xdce8f2, 0.30),
-            c(0xa6b8c8, 0.17),
+            c(0x2c3641, 0.70),
+            c(0x0e1318, 0.60),
         ));
-        out.border(rect, radius, 3., c(0xffffff, 0.05));
-        out.border(rect, radius, 1., c(0xffffff, 0.28));
+        out.border(rect, radius, 3., c(0xffffff, 0.06));
+        out.border(rect, radius, 1., c(0xffffff, 0.24));
     }
     if let Some(image) = artwork {
         // Inset so the glass shows around the icon; the icon keeps its own alpha here.
@@ -1181,16 +1223,13 @@ fn home(out: &mut Scene, state: &State, assets: &Assets, now: OffsetDateTime) {
     let mut grid_height = FACE_HEIGHT;
     if state.loading && state.inventory.apps.is_empty() {
         for index in 0..6 {
-            out.shape(
-                Rect::new(
-                    84. + index as f32 * GRID_PITCH,
-                    544.8 - s,
-                    270.,
-                    FACE_HEIGHT,
-                ),
-                19.2,
-                c(0xffffff, 0.06),
+            let rect = Rect::new(
+                84. + index as f32 * GRID_PITCH,
+                544.8 - s,
+                270.,
+                FACE_HEIGHT,
             );
+            out.shape(rect, squircle(rect), c(0xffffff, 0.06));
         }
     } else if apps.is_empty() {
         let error = state.error.is_some() && state.inventory.apps.is_empty();
@@ -3218,7 +3257,7 @@ fn options(out: &mut Scene, state: &State, assets: &Assets, id: &str, anchor: Op
         out.image(path, card, 16., false);
         out.border(card, 16., 1., c(0xffffff, 0.086));
     } else if let Some(app) = app.filter(|_| !shortcut) {
-        let favorite_color = app_face(out, assets, app, card, language, 19.2);
+        let favorite_color = app_face(out, assets, app, card, language, squircle(card));
         if favorite {
             favorite_badge(out, assets, card, favorite_color);
         }

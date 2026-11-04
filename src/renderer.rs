@@ -186,17 +186,28 @@ impl RenderStats {
     }
 }
 
+/// How the paint shader treats sampled texture colour. `Monochrome` turns installed app
+/// icons into a cool dark-mode grey without touching shape or alpha.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PaintMode {
+    Normal,
+    Monochrome,
+}
+
 enum BatchKind {
     Paint {
         texture: GLuint,
         start: usize,
         count: usize,
         backdrop: Option<[[u8; 3]; 2]>,
+        mode: PaintMode,
     },
     Vector {
         path: String,
         rect: Rect,
         tint: Color,
+        /// Curated brand logos render as cool monochrome glyphs on the glass plate.
+        mono: bool,
     },
     Text {
         key: TextKey,
@@ -217,13 +228,15 @@ fn full_screen(rect: &Rect) -> bool {
 }
 
 /// An opaque, untinted, square full-screen image: the wallpaper that scrims can fold into.
-fn plain_wallpaper(command: &Draw) -> Option<&str> {
+fn plain_wallpaper(command: &Draw) -> Option<(&str, Rect)> {
     match command {
-        Draw::Image(path, rect, radius, false) if full_screen(rect) && *radius <= 0. => Some(path),
+        Draw::Image(path, rect, radius, false) if full_screen(rect) && *radius <= 0. => {
+            Some((path.as_str(), *rect))
+        }
         Draw::TintedImage(path, rect, radius, false, tint)
             if full_screen(rect) && *radius <= 0. && *tint == [1.; 4] =>
         {
-            Some(path)
+            Some((path.as_str(), *rect))
         }
         _ => None,
     }
@@ -579,6 +592,28 @@ impl Renderer {
         self.gradient_quad(rect, uv, radius, border, [color, color], texture, None);
     }
 
+    /// A single-colour quad whose texture is desaturated and darkened by the paint shader.
+    fn mono_quad(
+        &mut self,
+        rect: Rect,
+        uv: [f32; 4],
+        radius: f32,
+        border: f32,
+        color: Color,
+        texture: GLuint,
+    ) {
+        self.paint_quad(
+            rect,
+            uv,
+            radius,
+            border,
+            [color, color],
+            texture,
+            None,
+            PaintMode::Monochrome,
+        );
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn gradient_quad(
         &mut self,
@@ -589,6 +624,30 @@ impl Renderer {
         colors: [Color; 2],
         texture: GLuint,
         backdrop: Option<[[u8; 3]; 2]>,
+    ) {
+        self.paint_quad(
+            rect,
+            uv,
+            radius,
+            border,
+            colors,
+            texture,
+            backdrop,
+            PaintMode::Normal,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn paint_quad(
+        &mut self,
+        rect: Rect,
+        uv: [f32; 4],
+        radius: f32,
+        border: f32,
+        colors: [Color; 2],
+        texture: GLuint,
+        backdrop: Option<[[u8; 3]; 2]>,
+        mode: PaintMode,
     ) {
         if rect.w <= 0. || rect.h <= 0. {
             return;
@@ -614,17 +673,18 @@ impl Renderer {
                 border,
             ]);
         }
-        self.paint_batch(start, 6, texture, backdrop);
+        self.paint_batch(start, 6, texture, backdrop, mode);
     }
 
     /// Appends `count` paint vertices from `start`, merged into the previous batch when it uses
-    /// the same texture, clip and fade.
+    /// the same texture, clip, fade and paint mode.
     fn paint_batch(
         &mut self,
         start: usize,
         count: usize,
         texture: GLuint,
         backdrop: Option<[[u8; 3]; 2]>,
+        mode: PaintMode,
     ) {
         if let Some(batch) = self.batches.last_mut() {
             let same_clip = match (batch.clip, self.clip) {
@@ -638,10 +698,12 @@ impl Renderer {
                     texture: previous,
                     count: batch_count,
                     backdrop: previous_backdrop,
+                    mode: previous_mode,
                     ..
                 } = &mut batch.kind
                 && *previous == texture
                 && *previous_backdrop == backdrop
+                && *previous_mode == mode
             {
                 *batch_count += count;
                 return;
@@ -653,6 +715,7 @@ impl Renderer {
                 start,
                 count,
                 backdrop,
+                mode,
             },
             clip: self.clip,
             fade: self.fade,
@@ -675,13 +738,15 @@ impl Renderer {
             }
             (m, k)
         };
+        // Scrims span the visible screen, so map the (possibly zoomed) wallpaper rect onto it.
+        let screen_t = |t: f32| ((rect.y + t * rect.h) / 1080.).clamp(0., 1.);
         let start = self.vertices.len() / 14;
         for strip in 0..STRIPS {
             let rows = [
                 strip as f32 / STRIPS as f32,
                 (strip + 1) as f32 / STRIPS as f32,
             ];
-            let folds = rows.map(fold);
+            let folds = rows.map(|row| fold(screen_t(row)));
             for (x, row) in [(0., 0), (1., 0), (0., 1), (0., 1), (1., 0), (1., 1)] {
                 let (m, k) = folds[row];
                 let t = rows[row];
@@ -703,7 +768,7 @@ impl Renderer {
                 ]);
             }
         }
-        self.paint_batch(start, STRIPS * 6, texture, None);
+        self.paint_batch(start, STRIPS * 6, texture, None, PaintMode::Normal);
     }
 
     fn text(&mut self, text: &str, rect: Rect, style: TextStyle, color: Color, centered: bool) {
@@ -746,6 +811,7 @@ impl Renderer {
                 | (u8::from(self.stats.multisample_samples > 1) << 2),
         };
         if self.text_runs.contains_key(&key) {
+            self.submit_text_shadow(&key, origin, color, size_f);
             self.submit_text(key, origin, color);
             return;
         }
@@ -930,7 +996,30 @@ impl Renderer {
                 frame: self.frame,
             },
         );
+        self.submit_text_shadow(&key, origin, color, size_f);
         self.submit_text(key, origin, color);
+    }
+
+    /// A dark offset copy of a text run, submitted before the real one. It reuses the same
+    /// cached outline, so the only cost is one more tiny draw; the result reads as type
+    /// floating above the glass rather than painted onto it.
+    fn submit_text_shadow(&mut self, key: &TextKey, origin: [f32; 2], color: Color, size: f32) {
+        let Some(run) = self.text_runs.get(key) else {
+            return;
+        };
+        if run.mesh.is_none() || color[3] <= 0. {
+            return;
+        }
+        let offset = (size * 0.045).clamp(1., 4.);
+        self.batches.push(Batch {
+            kind: BatchKind::Text {
+                key: key.clone(),
+                origin: [origin[0], origin[1] + offset],
+                tint: [0., 0., 0., color[3] * 0.42],
+            },
+            clip: self.clip,
+            fade: self.fade,
+        });
     }
 
     fn submit_text(&mut self, key: TextKey, origin: [f32; 2], tint: Color) {
@@ -1096,6 +1185,9 @@ impl Renderer {
                 path: path.into(),
                 rect,
                 tint,
+                // Curated brand artwork lives under logos/ and is tinted like an installed
+                // icon; UI glyphs (ui-icons/, clock, weather) keep their own colour.
+                mono: path.contains("logos/") || path.contains("logos\\"),
             },
             clip: Some(clip),
             fade: self.fade,
@@ -1162,8 +1254,8 @@ impl Renderer {
         let id = texture.id;
         // A squircle, like the plate it sits on: the shader clamps the radius to half the
         // shorter side, so this stays a rounded square rather than a circle.
-        let radius = w.min(h) * 0.22;
-        self.quad(
+        let radius = w.min(h) * 0.30;
+        self.mono_quad(
             Rect::new(rect.x + (rect.w - w) / 2., rect.y + (rect.h - h) / 2., w, h),
             [0., 0., 1., 1.],
             radius,
@@ -1242,7 +1334,7 @@ impl Renderer {
             if profile_skip(command) {
                 continue;
             }
-            if let Some(path) = plain_wallpaper(command)
+            if let Some((path, wallpaper)) = plain_wallpaper(command)
                 && self.clip.is_none()
                 && self.fade.is_none()
             {
@@ -1258,8 +1350,7 @@ impl Renderer {
                     }
                 }
                 if !scrims.is_empty() {
-                    let screen = Rect::new(0., 0., 1920., 1080.);
-                    self.folded_image(path, screen, 0., false, [1.; 4], &scrims);
+                    self.folded_image(path, wallpaper, 0., false, [1.; 4], &scrims);
                     continue;
                 }
             }
@@ -1413,6 +1504,7 @@ impl Renderer {
                         start,
                         count,
                         backdrop,
+                        mode,
                     } => {
                         if !paint_bound {
                             gl::UseProgram(self.program);
@@ -1437,6 +1529,14 @@ impl Renderer {
                             gl::GetUniformLocation(self.program, c"u_app".as_ptr()),
                             i32::from(backdrop.is_some()),
                         );
+                        gl::Uniform1f(
+                            gl::GetUniformLocation(self.program, c"u_icon_tint".as_ptr()),
+                            if matches!(mode, PaintMode::Monochrome) {
+                                1.
+                            } else {
+                                0.
+                            },
+                        );
                         if let Some(stops) = backdrop {
                             for (name, rgb) in
                                 [(c"u_app_top", stops[0]), (c"u_app_bottom", stops[1])]
@@ -1451,7 +1551,12 @@ impl Renderer {
                         }
                         gl::DrawArrays(gl::TRIANGLES, *start as i32, *count as i32);
                     }
-                    BatchKind::Vector { path, rect, tint } => {
+                    BatchKind::Vector {
+                        path,
+                        rect,
+                        tint,
+                        mono,
+                    } => {
                         let Some(mesh) = self.vectors.get(path).and_then(Option::as_ref) else {
                             continue;
                         };
@@ -1461,6 +1566,7 @@ impl Renderer {
                             [rect.w / mesh.width, rect.h / mesh.height, rect.x, rect.y],
                             *tint,
                             0.,
+                            if *mono { 1. } else { 0. },
                         );
                         paint_bound = false;
                     }
@@ -1476,6 +1582,7 @@ impl Renderer {
                             [1., 1., origin[0], origin[1]],
                             *tint,
                             embolden(size, self.text_embolden),
+                            0.,
                         );
                         paint_bound = false;
                     }
@@ -1525,6 +1632,7 @@ impl Renderer {
         transform: [f32; 4],
         tint: Color,
         embolden: f32,
+        mono: f32,
     ) {
         let viewport = self.stats.viewport;
         unsafe {
@@ -1577,6 +1685,7 @@ impl Renderer {
                 tint[2],
                 tint[3],
             );
+            gl::Uniform1f(gl::GetUniformLocation(program, c"u_mono".as_ptr()), mono);
             gl::DrawArrays(gl::TRIANGLES, 0, mesh.vertices);
         }
     }

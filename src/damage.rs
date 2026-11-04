@@ -7,7 +7,8 @@ use std::{collections::VecDeque, sync::Arc};
 /// EGL swap chains rotate a few buffers; older contents are redrawn in full.
 const HISTORY: usize = 4;
 /// Commands searched ahead to realign after an inserted or removed command (e.g. a focus ring).
-const LOOKAHEAD: usize = 8;
+/// The liquid halo adds a layered ring per focused card, so leave room for it.
+const LOOKAHEAD: usize = 24;
 
 /// The redraw region of one frame: `None` is the whole scene, an empty rect is no change.
 pub type Damage = Option<Rect>;
