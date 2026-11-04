@@ -968,9 +968,12 @@ fn run() -> Result<(), String> {
     let mut focused = true;
     let mut press: Option<Press> = None;
     let mut back_button = BackButton::default();
-    let initial_nav = view::navigation(&assets, state.preferences.language);
-    let mut pill = initial_nav.items[0].x;
-    let mut pill_width = initial_nav.items[0].w;
+    // The navigation bar's layout depends only on the language, so measure it once and reuse it
+    // every frame instead of laying the three labels out again on each loop iteration.
+    let mut navigation = view::navigation(&assets, state.preferences.language);
+    let mut navigation_language = state.preferences.language;
+    let mut pill = navigation.items[0].x;
+    let mut pill_width = navigation.items[0].w;
     let mut last_frame = Instant::now();
     let mut last_minute = None;
     let mut frame = 0u64;
@@ -1730,7 +1733,10 @@ fn run() -> Result<(), String> {
         }
         let dt = last_frame.elapsed().as_secs_f32().min(0.1);
         last_frame = Instant::now();
-        let navigation = view::navigation(&assets, state.preferences.language);
+        if state.preferences.language != navigation_language {
+            navigation_language = state.preferences.language;
+            navigation = view::navigation(&assets, navigation_language);
+        }
         let target = navigation.items[state.page_index()].x;
         let target_width = navigation.items[state.page_index()].w;
         if state.preferences.reduced_motion
