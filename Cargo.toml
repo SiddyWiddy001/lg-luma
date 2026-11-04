@@ -34,7 +34,11 @@ time = { version = "0.3", features = ["local-offset", "formatting", "parsing"] }
 ureq = { version = "3.4", default-features = false, features = ["rustls"] }
 
 [profile.release]
-lto = "thin"
+# Full LTO and a single codegen unit: the launcher runs on a weak mobile GPU TV where the CPU
+# is mostly busy tessellating and laying out the scene, so cross-unit inlining matters more than
+# build time. Everything else about the release build is unchanged.
+opt-level = 3
+lto = true
 strip = true
 codegen-units = 1
 
