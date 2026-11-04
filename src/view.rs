@@ -23,8 +23,10 @@ const RECENTS_BACKDROP_OPACITY: f32 = 0.86;
 /// Corner radius as a fraction of the shorter side. Larger than iOS's 0.223 so the
 /// shader's rounded-rectangle field reads as a smooth squircle at TV distance.
 const SQUIRCLE_RADIUS: f32 = 0.30;
-/// Ken Burns: the wallpaper reaches 5% zoom after 30 s, then eases back out.
-const KEN_BURNS_ZOOM: f32 = 0.05;
+/// Ken Burns: the wallpaper reaches 5% zoom after 30 s, then eases back out. Public because the
+/// renderer caps the wallpaper's texture at the size it is really displayed at, and that size
+/// includes this zoom.
+pub const KEN_BURNS_ZOOM: f32 = 0.05;
 const KEN_BURNS_PERIOD: f64 = 60.;
 
 #[path = "recents-view.rs"]

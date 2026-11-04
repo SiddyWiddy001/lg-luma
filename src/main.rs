@@ -20,6 +20,7 @@ mod platform;
 mod raster;
 mod recents;
 mod renderer;
+mod resample;
 #[path = "scroll-preview.rs"]
 mod scroll_preview;
 mod sdl_events;

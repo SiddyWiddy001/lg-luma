@@ -82,6 +82,9 @@ struct Texture {
     width: u32,
     height: u32,
     frame: u64,
+    /// The size cap this was uploaded under. A larger viewport later means a larger cap, and then
+    /// the cached copy is dropped and uploaded again instead of staying over-shrunk.
+    cap: (u32, u32),
 }
 impl Drop for Texture {
     fn drop(&mut self) {
@@ -460,7 +463,7 @@ impl Renderer {
             gl::Disable(gl::DEPTH_TEST);
             gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
         }
-        let white = texture(1, 1, &[255; 4]);
+        let white = texture(1, 1, &[255; 4], NO_CAP);
         Ok(Self {
             program,
             vector_program,
@@ -1084,6 +1087,8 @@ impl Renderer {
         }
         let frame = self.frame;
         let started = Instant::now();
+        let cap = self.wallpaper_limit();
+        self.forget_mismatched_upload(&path, cap);
         let loaded = !self.textures.contains_key(&path);
         let entry = self
             .textures
@@ -1091,7 +1096,18 @@ impl Renderer {
             .or_insert_with(|| match image::open(&path) {
                 Ok(image) => {
                     let image = image.into_rgba8();
-                    Some(texture(image.width(), image.height(), image.as_raw()))
+                    let target = crate::resample::screen_upload_size(
+                        image.width(),
+                        image.height(),
+                        cap,
+                    );
+                    Some(upload(
+                        image.width(),
+                        image.height(),
+                        image.as_raw(),
+                        target,
+                        cap,
+                    ))
                 }
                 Err(error) => {
                     eprintln!("Artwork {path}: {error}");
@@ -1117,6 +1133,41 @@ impl Renderer {
             self.quad(rect, [0., 0., 1., 1.], plain_radius(radius), 0., tint, id);
         } else {
             self.folded_quad(rect, id, scrims);
+        }
+    }
+
+    /// The largest physical size a full-screen image can be displayed at: the drawable, enlarged
+    /// by the Ken Burns zoom that scales the wallpaper up behind the plates, and never beyond what
+    /// this GL driver can hold as a texture.
+    fn wallpaper_limit(&self) -> (u32, u32) {
+        let zoom = 1. + crate::view::KEN_BURNS_ZOOM;
+        let (width, height) = crate::resample::largest_display(self.stats.target);
+        let ceiling = self.info.max_texture_size.max(1);
+        (
+            ((width as f32 * zoom).ceil() as u32).min(ceiling),
+            ((height as f32 * zoom).ceil() as u32).min(ceiling),
+        )
+    }
+
+    /// The largest physical box app artwork is ever drawn in, including the launch zoom, never
+    /// beyond what this GL driver can hold as a texture.
+    fn artwork_limit(&self) -> (u32, u32) {
+        let (side, _) = crate::resample::largest_artwork_display(self.stats.target);
+        let ceiling = self.info.max_texture_size.max(1);
+        (side.min(ceiling), side.min(ceiling))
+    }
+
+    /// Drops a cached upload whose cap no longer matches the viewport, so a larger display later
+    /// gets a correspondingly larger copy instead of keeping one shrunk for a smaller screen.
+    /// Removing it runs `Texture`'s `Drop`, which deletes the GL texture.
+    fn forget_mismatched_upload(&mut self, key: &str, cap: (u32, u32)) {
+        let stale = self
+            .textures
+            .get(key)
+            .and_then(|entry| entry.as_ref())
+            .is_some_and(|texture| texture.cap != cap);
+        if stale {
+            self.textures.remove(key);
         }
     }
 
@@ -1201,11 +1252,17 @@ impl Renderer {
         radius: f32,
         tint: Color,
     ) {
+        let cap = self.artwork_limit();
+        self.forget_mismatched_upload(&image.key, cap);
         let entry = self.textures.entry(image.key.clone()).or_insert_with(|| {
-            Some(texture(
-                image.pixels.width(),
-                image.pixels.height(),
+            let (source_width, source_height) = (image.pixels.width(), image.pixels.height());
+            let target = crate::resample::artwork_upload_size(source_width, source_height, cap);
+            Some(upload(
+                source_width,
+                source_height,
                 image.pixels.as_raw(),
+                target,
+                cap,
             ))
         });
         let Some(texture) = entry else {
@@ -1237,11 +1294,20 @@ impl Renderer {
     /// translucent plate painted underneath stays visible around it. Unlike `app_image` this
     /// does not take the shader's opaque app path, so no backdrop is filled behind it.
     fn app_icon(&mut self, image: &crate::app_artwork::Artwork, rect: Rect, tint: Color) {
+        let cap = self.artwork_limit();
+        self.forget_mismatched_upload(&image.key, cap);
         let entry = self.textures.entry(image.key.clone()).or_insert_with(|| {
-            Some(texture(
+            let target = crate::resample::artwork_upload_size(
+                image.pixels.width(),
+                image.pixels.height(),
+                cap,
+            );
+            Some(upload(
                 image.pixels.width(),
                 image.pixels.height(),
                 image.pixels.as_raw(),
+                target,
+                cap,
             ))
         });
         let Some(texture) = entry else {
@@ -1730,7 +1796,7 @@ impl Renderer {
                 size.width, size.height, self.info.max_texture_size, self.info.max_viewport
             ));
         }
-        let image = texture(size.width, size.height, &[]);
+        let image = texture(size.width, size.height, &[], NO_CAP);
         let mut framebuffer = 0;
         unsafe {
             gl::GenFramebuffers(1, &mut framebuffer);
@@ -1898,7 +1964,11 @@ impl Drop for Renderer {
     }
 }
 
-fn texture(width: u32, height: u32, pixels: &[u8]) -> Texture {
+/// A cap that never shrinks anything: used for textures that are render targets or solid fills
+/// rather than decoded image files.
+const NO_CAP: (u32, u32) = (u32::MAX, u32::MAX);
+
+fn texture(width: u32, height: u32, pixels: &[u8], cap: (u32, u32)) -> Texture {
     let mut id = 0;
     unsafe {
         gl::GenTextures(1, &mut id);
@@ -1928,7 +1998,26 @@ fn texture(width: u32, height: u32, pixels: &[u8]) -> Texture {
         width,
         height,
         frame: 0,
+        cap,
     }
+}
+
+/// Uploads RGBA8 as a texture, resampling it to `target` with Lanczos3 first when the decoded file
+/// is bigger than the largest size this image is ever drawn at. The pixel format stays RGBA8, so
+/// colours are not re-quantised and edges keep the same look; only the texel count - and the GPU's
+/// per-frame downscaling work - goes away.
+fn upload(
+    width: u32,
+    height: u32,
+    pixels: &[u8],
+    target: (u32, u32),
+    cap: (u32, u32),
+) -> Texture {
+    if target == (width, height) {
+        return texture(width, height, pixels, cap);
+    }
+    let resized = crate::resample::lanczos3_rgba(pixels, width, height, target.0, target.1);
+    texture(target.0, target.1, &resized, cap)
 }
 
 fn gl_string(name: GLenum) -> String {
