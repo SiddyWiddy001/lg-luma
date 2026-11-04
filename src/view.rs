@@ -1852,8 +1852,17 @@ fn library_grid(out: &mut Scene, state: &State, assets: &Assets) {
             favorites.contains(&app.id),
         );
     };
+    let grid_bottom = {
+        let viewport = state.content_viewport();
+        viewport.y + viewport.h
+    };
     let mut focused: Option<(&App, Rect, f32)> = None;
     for row in apps.chunks(APPS_COLUMNS) {
+        // Rows only ever start further down, so once a row begins past the viewport there is
+        // nothing left to measure or draw.
+        if y - s > grid_bottom {
+            break;
+        }
         // Measure each caption once for the row instead of again for every tile that wraps it.
         let captions: Vec<f32> = if names {
             row.iter()
