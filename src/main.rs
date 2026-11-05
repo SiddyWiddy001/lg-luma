@@ -1738,7 +1738,11 @@ fn run() -> Result<(), String> {
             }
             text_active = keyboard;
         }
-        let dt = last_frame.elapsed().as_secs_f32().min(0.1);
+        // Eased motion advances at most two 60 Hz frames per step. `last_frame` spans the idle
+        // wait at the bottom of the loop, so an unclamped step would spend almost the whole
+        // distance on the first frame after a key press and the card would snap instead of
+        // glide; 1/30 s also covers a genuinely slow frame without stalling the ramp.
+        let ease = last_frame.elapsed().as_secs_f32().min(1. / 30.);
         last_frame = Instant::now();
         if state.preferences.language != navigation_language {
             navigation_language = state.preferences.language;
@@ -1752,8 +1756,8 @@ fn run() -> Result<(), String> {
             pill = target;
             pill_width = target_width;
         } else {
-            pill += (target - pill) * (1. - (-20. * dt).exp());
-            pill_width += (target_width - pill_width) * (1. - (-20. * dt).exp());
+            pill += (target - pill) * (1. - (-20. * ease).exp());
+            pill_width += (target_width - pill_width) * (1. - (-20. * ease).exp());
             state.dirty = true;
         }
         if ken_burns {
@@ -1763,7 +1767,7 @@ fn run() -> Result<(), String> {
         // smoothing as the nav pill above: about 0.15 s to settle, interpolated every frame so
         // a focused icon eases up instead of snapping, a held OK pinches the tile, and a
         // released press lets it pop back. Reduced Motion pins the values instantly.
-        let smooth = 1. - (-20. * dt).exp();
+        let smooth = 1. - (-20. * ease).exp();
         let focused_app = match &state.focus {
             Target::App(id) => Some(id.clone()),
             _ => None,
