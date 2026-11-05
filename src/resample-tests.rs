@@ -28,7 +28,16 @@ fn tap_weights_sum_to_one_pixel() {
 
 #[test]
 fn resampling_a_flat_colour_keeps_it_exact() {
-    for (source, target) in [(8, 8), (8, 5), (5, 8), (16, 1), (1, 16)] {
+    // Each case is a source size and a target size, so the axes can change in different
+    // directions: one row of the image resamples on its own, then one column.
+    for (source, target) in [
+        ((8, 8), (5, 5)),
+        ((5, 5), (8, 8)),
+        ((8, 5), (3, 7)),
+        ((16, 4), (1, 1)),
+        ((1, 16), (16, 1)),
+        ((8, 8), (8, 8)),
+    ] {
         let out = lanczos3_rgba(
             &flat(source.0, source.1),
             source.0,
