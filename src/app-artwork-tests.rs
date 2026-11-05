@@ -629,7 +629,7 @@ fn visible_cards_switch_from_fallback_to_an_inset_icon_on_a_glass_plate() {
                 && rect.y < face.y
                 && rect.x + rect.w > face.x + face.w
                 && rect.y + rect.h > face.y + face.h;
-            (covers && dark(top) && dark(bottom)).then(|| (*rect, *radius, *top, *bottom))
+            (covers && dark(top) && dark(bottom)).then_some((*rect, *radius, *top, *bottom))
         }
         _ => None,
     };
