@@ -1837,13 +1837,13 @@ fn run() -> Result<(), String> {
                     .as_ref()
                     .map_or(0., |zoom| zoom.started.elapsed().as_secs_f32());
                 let mut send: Option<String> = None;
-                if platform.webos && elapsed >= crate::state::LAUNCH_ZOOM * 0.7 {
-                    if let Some(zoom) = state.launch_zoom.as_mut()
-                        && !zoom.sent
-                    {
-                        zoom.sent = true;
-                        send = Some(zoom.app.clone());
-                    }
+                if platform.webos
+                    && elapsed >= crate::state::LAUNCH_ZOOM * 0.7
+                    && let Some(zoom) = state.launch_zoom.as_mut()
+                    && !zoom.sent
+                {
+                    zoom.sent = true;
+                    send = Some(zoom.app.clone());
                 }
                 if let Some(id) = send {
                     // Most of the way through the flight, ask webOS to open the app: its window

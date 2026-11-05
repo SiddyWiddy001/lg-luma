@@ -915,14 +915,13 @@ fn tile(
     assets: &Assets,
     app: &App,
     rect: Rect,
-    names: bool,
-    caption: f32,
+    caption: Option<f32>,
     pinned: bool,
 ) {
-    // Caption height is measured once per app by the caller that lays the grid out; measuring
-    // it again here would run the word-wrap pass a second time for every visible tile.
-    let caption_height = if names { caption } else { 0. };
-    let label_height = if names { 18.4 + caption_height } else { 0. };
+    // A caption height of `None` means the names are off. The caller measures it once per app
+    // while laying the grid out; measuring it again here would run the wrap pass a second time
+    // for every visible tile.
+    let label_height = caption.map_or(0., |height| 18.4 + height);
     out.control(
         Target::App(app.id.clone()),
         Rect::new(rect.x, rect.y, rect.w, rect.h + label_height),
@@ -1035,7 +1034,7 @@ fn tile(
         // and the eased value fades the dim back out on release instead of snapping it off.
         out.fade(start, 1., 1. - 0.15 * press);
     }
-    if names {
+    if let Some(caption_height) = caption {
         out.text(
             format!(
                 "{}{}",
@@ -1449,8 +1448,7 @@ fn home(out: &mut Scene, state: &State, assets: &Assets, now: OffsetDateTime) {
                 HOME_TILE_WIDTH,
                 FACE_HEIGHT,
             ),
-            names,
-            captions.get(index).copied().unwrap_or(0.),
+            captions.get(index).copied(),
             false,
         );
     };
@@ -1863,14 +1861,13 @@ fn library_grid(out: &mut Scene, state: &State, assets: &Assets) {
     let mut y = 270.4;
     let names = state.preferences.show_app_names;
     // Same as the Home strip: the focused card goes last so its bloom stays visible.
-    let draw_tile = |out: &mut Scene, app: &App, rect: Rect, caption: f32| {
+    let draw_tile = |out: &mut Scene, app: &App, rect: Rect, caption: Option<f32>| {
         tile(
             out,
             state,
             assets,
             app,
             rect,
-            names,
             caption,
             favorites.contains(&app.id),
         );
@@ -1879,7 +1876,7 @@ fn library_grid(out: &mut Scene, state: &State, assets: &Assets) {
         let viewport = state.content_viewport();
         viewport.y + viewport.h
     };
-    let mut focused: Option<(&App, Rect, f32)> = None;
+    let mut focused: Option<(&App, Rect, Option<f32>)> = None;
     for row in apps.chunks(APPS_COLUMNS) {
         // Rows only ever start further down, so once a row begins past the viewport there is
         // nothing left to measure or draw.
@@ -1902,7 +1899,7 @@ fn library_grid(out: &mut Scene, state: &State, assets: &Assets) {
             };
         for (column, app) in row.iter().enumerate() {
             let rect = Rect::new(84. + column as f32 * GRID_PITCH, y - s, 270., FACE_HEIGHT);
-            let caption = captions.get(column).copied().unwrap_or(0.);
+            let caption = captions.get(column).copied();
             if state.focus == Target::App(app.id.clone()) {
                 focused = Some((app, rect, caption));
                 continue;

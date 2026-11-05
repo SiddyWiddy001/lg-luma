@@ -76,15 +76,14 @@ fn taps(index: u32, source_len: u32, target_len: u32) -> Vec<Tap> {
     // The difference goes to the strongest tap, so a flat colour maps back to itself exactly.
     let rounded: i32 = taps.iter().map(|tap| tap.weight).sum();
     let residual = SCALE as i32 - rounded;
-    if residual != 0 {
-        if let Some(strongest) = taps
+    if residual != 0
+        && let Some(strongest) = taps
             .iter()
             .enumerate()
             .max_by_key(|(_, tap)| tap.weight.abs())
             .map(|(index, _)| index)
-        {
-            taps[strongest].weight += residual;
-        }
+    {
+        taps[strongest].weight += residual;
     }
     taps
 }
@@ -190,8 +189,8 @@ pub fn lanczos3_rgba(
     let target_stride = target_width as usize * 4;
     let mut out = vec![0; target_stride * target_height as usize];
     for row in 0..target_height as usize {
-        for column in 0..target_width as usize {
-            let pixel = blend_pixel(&columns[column], &middle, 4, row * stride);
+        for (column, taps) in columns.iter().enumerate() {
+            let pixel = blend_pixel(taps, &middle, 4, row * stride);
             let at = row * target_stride + column * 4;
             out[at..at + 4].copy_from_slice(&pixel);
         }
