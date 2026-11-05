@@ -469,10 +469,18 @@ fn favorite_badge_uses_the_local_gradient_and_maximum_black_white_contrast() {
     }
 }
 
+/// The glass plate is dark smoked glass whatever the installed icon looks like, so the badge is
+/// always the same white mark with a dark offset under it, rather than a colour picked from the
+/// icon's own backdrop.
 #[test]
-fn grid_and_options_use_matching_adaptive_hearts_without_a_backing_circle() {
-    use crate::{renderer::Draw, state::Target};
-    for (pixel, expected) in [([255; 4], [0., 0., 0., 1.]), ([0, 0, 0, 255], [1.; 4])] {
+fn both_grids_and_the_options_card_use_one_white_heart_with_a_dark_offset() {
+    use crate::renderer::{Color, Draw};
+    use crate::state::Target;
+    const SHADOW: Color = [3. / 255., 6. / 255., 10. / 255., 0.38];
+    const MARK: Color = [1.; 4];
+    // A plain white icon and a plain black one: the plate is what decides the badge colour, so
+    // neither may move it.
+    for pixel in [[255; 4], [0, 0, 0, 255]] {
         let assets = crate::view::Assets {
             root: PathBuf::new(),
             version: "test".into(),
@@ -512,14 +520,14 @@ fn grid_and_options_use_matching_adaptive_hearts_without_a_backing_circle() {
             render(&state)
                 .draw
                 .iter()
-                .any(|draw| matches!(draw, Draw::AppImage(..)))
+                .any(|draw| matches!(draw, Draw::AppIcon(..)))
         });
         for popup in [false, true] {
             if popup {
                 state.options();
             }
             let scene = render(&state);
-            let colors: Vec<_> = scene
+            let hearts: Vec<_> = scene
                 .draw
                 .iter()
                 .filter_map(|draw| match draw {
@@ -531,7 +539,17 @@ fn grid_and_options_use_matching_adaptive_hearts_without_a_backing_circle() {
                     _ => None,
                 })
                 .collect();
-            assert_eq!(colors, vec![expected; if popup { 2 } else { 1 }]);
+            // One badge on the tile that stands in the grid, and a second on the card the popup
+            // lifts out of it: a dark offset painted first, then the white mark over it.
+            let badges = if popup { 2 } else { 1 };
+            let mut expected: Vec<Color> = Vec::new();
+            for _ in 0..badges {
+                expected.extend([SHADOW, MARK]);
+            }
+            assert_eq!(
+                hearts, expected,
+                "one white mark over a dark offset for every badge"
+            );
             assert!(!scene.draw.iter().any(|draw| matches!(draw,
                 Draw::Shape(rect, radius, _, _) if rect.w == 28. && rect.h == 28. && *radius == 14.
             )));
@@ -540,7 +558,7 @@ fn grid_and_options_use_matching_adaptive_hearts_without_a_backing_circle() {
 }
 
 #[test]
-fn visible_cards_switch_from_fallback_to_a_single_composited_installed_surface() {
+fn visible_cards_switch_from_fallback_to_an_inset_icon_on_a_glass_plate() {
     let assets = crate::view::Assets {
         root: PathBuf::new(),
         version: "test".into(),
@@ -569,42 +587,75 @@ fn visible_cards_switch_from_fallback_to_a_single_composited_installed_surface()
             time::OffsetDateTime::UNIX_EPOCH,
         )
     };
-    assert!(
-        !scene()
+    let icons = |scene: &crate::view::Scene| {
+        scene
             .draw
             .iter()
-            .any(|draw| matches!(draw, crate::renderer::Draw::AppImage(..)))
+            .filter(|draw| matches!(draw, crate::renderer::Draw::AppIcon(..)))
+            .count()
+    };
+    assert_eq!(
+        icons(&scene()),
+        0,
+        "the generic surface stands in until the icon decodes"
     );
-    poll_until(&assets.artwork, || {
-        scene()
+    poll_until(&assets.artwork, || icons(&scene()) > 0);
+    let loaded = scene();
+    assert_eq!(icons(&loaded), 1, "one installed icon per visible card");
+    assert!(
+        !loaded
             .draw
             .iter()
-            .any(|draw| matches!(draw, crate::renderer::Draw::AppImage(..)))
-    });
-    let loaded = scene();
-    let (image, face, radius) = loaded
+            .any(|draw| matches!(draw, crate::renderer::Draw::AppImage(..))),
+        "nothing composites the backdrop into the icon any more"
+    );
+    let (face, tint) = loaded
         .draw
         .iter()
         .find_map(|draw| match draw {
-            crate::renderer::Draw::AppImage(image, rect, radius, _) => Some((image, rect, radius)),
+            crate::renderer::Draw::AppIcon(_, rect, tint) => Some((*rect, *tint)),
             _ => None,
         })
         .unwrap();
-    assert_eq!(image.backdrop, [[24, 40, 56]; 2]);
-    assert!(*radius > 0.);
-    // The image command covers the entire rounded face, not just the inset icon.
-    // A separate backdrop would be faded twice under the icon and expose its box.
-    let same_face =
-        |r: &crate::state::Rect| r.x == face.x && r.y == face.y && r.w == face.w && r.h == face.h;
+    assert_eq!(tint, [1.; 4], "the icon keeps its own alpha over the plate");
+    // The plate it sits on: a dark translucent gradient over the whole face, so the glass shows
+    // around the inset icon and a white badge stays legible on top of it. The tile's own rim
+    // reflection has the same shape, so the dark stops are what pick out the glass.
+    let glass_on_face = |draw: &crate::renderer::Draw| match draw {
+        crate::renderer::Draw::RoundedGradient(rect, radius, top, bottom) => {
+            let dark = |stop: &[f32; 4]| (stop[0] + stop[1] + stop[2]) / 3. < 0.3;
+            let covers = rect.w < 400.
+                && rect.x < face.x
+                && rect.y < face.y
+                && rect.x + rect.w > face.x + face.w
+                && rect.y + rect.h > face.y + face.h;
+            (covers && dark(top) && dark(bottom)).then(|| (*rect, *radius, *top, *bottom))
+        }
+        _ => None,
+    };
+    let plate = loaded.draw.iter().find_map(glass_on_face).unwrap();
+    assert!(plate.1 > 0., "the plate is a rounded face");
+    for stop in [plate.2, plate.3] {
+        assert!(stop[3] < 1., "{stop:?} is opaque, not smoked glass");
+    }
+    // The rim runs along that same face, and the icon sits centred inside it.
+    let same_face = |r: &crate::state::Rect| {
+        r.x == plate.0.x && r.y == plate.0.y && r.w == plate.0.w && r.h == plate.0.h
+    };
     assert!(loaded.draw.iter().any(|draw| matches!(draw,
-        crate::renderer::Draw::Shape(rect, r, border, _) if same_face(rect) && r == radius && *border == 1.
+        crate::renderer::Draw::Shape(rect, radius, border, _)
+            if same_face(rect) && *radius == plate.1 && *border == 1.
     )));
-    assert!(!loaded.draw.iter().any(|draw| match draw {
-        crate::renderer::Draw::Shape(rect, _, border, _) => same_face(rect) && *border == 0.,
-        crate::renderer::Draw::RoundedGradient(rect, ..)
-        | crate::renderer::Draw::Image(_, rect, ..) => same_face(rect),
-        _ => false,
-    }));
+    let (centre_x, centre_y) = face.center();
+    let (plate_x, plate_y) = plate.0.center();
+    assert!(
+        (centre_x - plate_x).abs() < 0.01 && (centre_y - plate_y).abs() < 0.01,
+        "the icon is centred on the plate"
+    );
+    assert!(
+        face.w < plate.0.w && face.h < plate.0.h,
+        "the glass shows around the icon"
+    );
 }
 
 #[test]
