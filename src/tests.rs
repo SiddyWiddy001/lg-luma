@@ -558,6 +558,91 @@ fn repeat_presses_during_a_glide_reveal_the_same_row() {
 }
 
 #[test]
+fn revealing_a_favourite_card_glides_the_strip_to_it() {
+    let mut state = ready();
+    let favorites: Vec<_> = state
+        .inventory
+        .apps
+        .iter()
+        .take(9)
+        .map(|app| app.id.clone())
+        .collect();
+    state.preferences.favorites = Some(favorites.clone());
+    state.focus(Target::App(favorites[8].clone()), &controls(&state));
+    assert!(
+        state.home_scroll_target > 0.,
+        "the last card needs the strip moved"
+    );
+    assert_eq!(
+        state.home_scroll, 0.,
+        "the strip is still drawn where it was"
+    );
+    assert!(state.animating(), "a gliding strip keeps painting");
+    // The same smoothing step the frame loop applies at about 60 fps.
+    for _ in 0..40 {
+        if !state.ease_scroll(0.28, false) {
+            break;
+        }
+    }
+    assert_eq!(
+        state.home_scroll, state.home_scroll_target,
+        "the glide settles"
+    );
+    assert!(!state.animating(), "a settled strip stops painting");
+    let focused = controls(&state)
+        .into_iter()
+        .find(|c| c.target == state.focus)
+        .unwrap();
+    assert!(focused.rect.x >= crate::state::HOME_STRIP_LEFT);
+    let right = crate::state::HOME_STRIP_RIGHT;
+    assert!(focused.rect.x + focused.rect.w <= right);
+}
+
+#[test]
+fn reduced_motion_reveals_a_card_without_a_glide() {
+    let mut state = ready();
+    state.preferences.reduced_motion = true;
+    let favorites: Vec<_> = state
+        .inventory
+        .apps
+        .iter()
+        .take(9)
+        .map(|app| app.id.clone())
+        .collect();
+    state.preferences.favorites = Some(favorites.clone());
+    state.focus(Target::App(favorites[8].clone()), &controls(&state));
+    assert!(state.home_scroll > 0., "Reduced Motion lands at once");
+    assert_eq!(state.home_scroll, state.home_scroll_target);
+    assert!(!state.animating());
+}
+
+#[test]
+fn repeat_presses_during_a_strip_glide_reveal_the_same_card() {
+    let mut state = ready();
+    let favorites: Vec<_> = state
+        .inventory
+        .apps
+        .iter()
+        .take(9)
+        .map(|app| app.id.clone())
+        .collect();
+    state.preferences.favorites = Some(favorites.clone());
+    state.focus(Target::App(favorites[8].clone()), &controls(&state));
+    let settled = state.home_scroll_target;
+    assert!(settled > 0.);
+    state.ease_scroll(0.28, false);
+    assert!(
+        state.home_scroll < state.home_scroll_target,
+        "the strip is still gliding"
+    );
+    state.focus(Target::App(favorites[8].clone()), &controls(&state));
+    assert!(
+        (state.home_scroll_target - settled).abs() < 0.01,
+        "pressing again mid-glide must not slide the strip again"
+    );
+}
+
+#[test]
 fn cancelling_options_preserves_identity_and_does_not_save() {
     let mut state = ready();
     state.focus = Target::App("netflix".into());

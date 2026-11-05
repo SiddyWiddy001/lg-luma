@@ -469,9 +469,10 @@ fn compose(
     now: OffsetDateTime,
 ) -> view::Scene {
     let scene = view::scene_with_pill(state, assets, pill, width, now);
-    // Revealing remote focus only redraws differently when it moves the Home strip. The
-    // vertical list takes a new position that the frame loop eases toward, so the layout this
-    // compose returns is already the right one to draw.
+    // Revealing remote focus only redraws differently when the favourites strip lands at
+    // once - Reduced Motion or a clamp after the favourites changed. Both lists otherwise
+    // take a new position that the frame loop eases toward, so the layout this compose
+    // returns is already the right one to draw.
     if !state.pointer && state.overlay.is_none() && state.reveal_focus(&scene.controls) {
         view::scene_with_pill(state, assets, pill, width, now)
     } else {
@@ -1770,9 +1771,10 @@ fn run() -> Result<(), String> {
         // a focused icon eases up instead of snapping, a held OK pinches the tile, and a
         // released press lets it pop back. Reduced Motion pins the values instantly.
         let smooth = 1. - (-20. * ease).exp();
-        // The scrolling list glides to the position `reveal_focus` picked. Without this the
-        // whole grid jumped the moment focus moved onto a row that does not fit on screen. A
-        // hidden window has nothing to animate, so it lands where it is heading instead.
+        // The scrolling list and the favourites strip glide to the positions `reveal_focus`
+        // picked. Without this the grid and the strip jumped the moment focus moved onto a row
+        // or card that does not fit on screen. A hidden window has nothing to animate, so it
+        // lands where it is heading instead.
         if visible {
             state.ease_scroll(smooth, state.preferences.reduced_motion);
         } else {

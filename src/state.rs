@@ -235,7 +235,10 @@ pub struct State {
     /// The settled position the list is heading for: the top of the content, plus the amount
     /// needed to keep the focused control inside the viewport.
     pub scroll_target: f32,
+    /// Where the favourites strip is drawn, eased toward `home_scroll_target` by the same
+    /// smoothing as the vertical list, so revealing a card glides too.
     pub home_scroll: f32,
+    pub home_scroll_target: f32,
     pub overlay: Option<Overlay>,
     pub moving: Option<String>,
     pub loading: bool,
@@ -293,6 +296,7 @@ impl State {
             scroll: 0.,
             scroll_target: 0.,
             home_scroll: 0.,
+            home_scroll_target: 0.,
             overlay: None,
             moving: None,
             loading: false,
@@ -461,10 +465,11 @@ impl State {
                 || self.recents.cards_animating(self.pointer)))
             || self.previous_background.is_some()
             || self.panel_started.is_some()
-            // A list still gliding to the revealed row. The frame loop does the easing, so the
-            // wake decision here is what keeps it painted instead of falling back to the idle
-            // wait and jumping the rest of the way.
+            // A list or strip still gliding to the revealed row or card. The frame loop does
+            // the easing, so the wake decision here is what keeps it painted instead of
+            // falling back to the idle wait and jumping the rest of the way.
             || self.scroll != self.scroll_target
+            || self.home_scroll != self.home_scroll_target
             || (!self.preferences.reduced_motion
                 && self
                     .notice
@@ -663,11 +668,28 @@ impl State {
             (count - 1) as f32 * HOME_TILE_PITCH + HOME_TILE_WIDTH
         };
         let max = (content - (HOME_STRIP_RIGHT - HOME_STRIP_LEFT)).max(0.);
-        let next = (self.home_scroll + delta).clamp(0., max);
-        if next != self.home_scroll {
-            self.home_scroll = next;
-            self.dirty = true;
+        // A wheel turn is direct manipulation: it moves the strip right now rather than
+        // easing to it, and it accumulates from where the strip is drawn, so a turn during a
+        // glide takes over from the position the viewer can see. Without a delta the
+        // favourites themselves changed - a reorder, a hide, an inventory refresh - and the
+        // strip lands on the new content at once instead of sliding across it.
+        let drawn = if delta != 0. {
+            (self.home_scroll + delta).clamp(0., max)
+        } else {
+            self.home_scroll.clamp(0., max)
+        };
+        let target = if delta != 0. {
+            drawn
+        } else {
+            self.home_scroll_target.clamp(0., max)
+        };
+        let (was_drawn, was_target) = (self.home_scroll, self.home_scroll_target);
+        if drawn == was_drawn && target == was_target {
+            return;
         }
+        self.home_scroll = drawn;
+        self.home_scroll_target = target;
+        self.dirty = true;
     }
 
     pub fn set_inventory(&mut self, next: Inventory, warning: Option<String>) {
@@ -805,45 +827,71 @@ impl State {
         self.scroll_target = value;
     }
 
-    /// Stops the list where it was heading, skipping the glide.
+    /// Stops every glide where it was heading, skipping the animation.
     pub fn settle_scroll(&mut self) {
         self.scroll = self.scroll_target;
+        self.home_scroll = self.home_scroll_target;
     }
 
-    /// Eases the drawn list toward `scroll_target`. `step` is the same smoothing factor the
-    /// frame loop uses for the nav pill, so the grid and the pill move together. Returns
-    /// whether the list moved, which is how the loop knows to keep painting.
-    pub fn ease_scroll(&mut self, step: f32, reduced_motion: bool) -> bool {
-        if self.scroll == self.scroll_target {
+    /// Eases one position toward its target with the frame loop's smoothing factor. The last
+    /// half pixel is invisible, and leaving a fractional remainder would keep the frame loop
+    /// painting a strip or list that has effectively stopped moving.
+    fn ease_axis(current: &mut f32, target: f32, step: f32, reduced_motion: bool) -> bool {
+        if *current == target {
             return false;
         }
-        self.scroll = if reduced_motion {
-            self.scroll_target
+        *current = if reduced_motion {
+            target
         } else {
-            let next = self.scroll + (self.scroll_target - self.scroll) * step;
-            // The last half pixel is invisible, and leaving a fractional remainder would keep
-            // the frame loop painting a list that has effectively stopped moving.
-            if (self.scroll_target - next).abs() < 0.5 {
-                self.scroll_target
+            let next = *current + (target - *current) * step;
+            if (target - next).abs() < 0.5 {
+                target
             } else {
                 next
             }
         };
-        self.dirty = true;
         true
+    }
+
+    /// Eases the drawn list and the favourites strip toward their targets. `step` is the same
+    /// smoothing factor the frame loop uses for the nav pill, so everything moves together.
+    /// Returns whether anything moved, which is how the loop knows to keep painting.
+    pub fn ease_scroll(&mut self, step: f32, reduced_motion: bool) -> bool {
+        // Both axes are eased, not short-circuited: a list and a strip could otherwise be
+        // gliding on the same frame, and the one that was skipped would never settle.
+        let list = Self::ease_axis(&mut self.scroll, self.scroll_target, step, reduced_motion);
+        let strip = Self::ease_axis(
+            &mut self.home_scroll,
+            self.home_scroll_target,
+            step,
+            reduced_motion,
+        );
+        let moved = list || strip;
+        if moved {
+            self.dirty = true;
+        }
+        moved
     }
 
     /// Remote focus is revealed after layout changes, including hide/reorder.
     /// Pointer paths deliberately do not call this method.
     pub fn reveal_focus(&mut self, controls: &[Control]) -> bool {
         let previous = self.scroll_target;
-        let previous_home = self.home_scroll;
+        let previous_home = self.home_scroll_target;
+        let drawn_home = self.home_scroll;
         if let Some(control) = controls.iter().find(|c| c.target == self.focus) {
             if self.page == Page::Home && matches!(self.focus, Target::App(_)) {
-                if control.rect.x < HOME_STRIP_LEFT {
-                    self.home_scroll += control.rect.x - HOME_STRIP_LEFT;
-                } else if control.rect.x + control.rect.w > HOME_STRIP_RIGHT {
-                    self.home_scroll += control.rect.x + control.rect.w - HOME_STRIP_RIGHT;
+                // `control.rect.x` sits at the drawn strip position, which trails the target
+                // while a reveal is gliding. Undoing that offset gives the card's place in
+                // the unscrolled strip, and both tests are made against where it will sit
+                // once the strip has settled, so repeated presses mid-glide land on the
+                // same card instead of accumulating the error between the two.
+                let unscrolled = control.rect.x + self.home_scroll;
+                let settled = unscrolled - self.home_scroll_target;
+                if settled < HOME_STRIP_LEFT {
+                    self.home_scroll_target = (unscrolled - HOME_STRIP_LEFT).max(0.);
+                } else if settled + control.rect.w > HOME_STRIP_RIGHT {
+                    self.home_scroll_target = unscrolled + control.rect.w - HOME_STRIP_RIGHT;
                 }
             }
             if matches!(
@@ -890,13 +938,15 @@ impl State {
         if self.preferences.reduced_motion {
             self.settle_scroll();
         }
-        if self.scroll_target != previous || self.home_scroll != previous_home {
+        if self.scroll_target != previous || self.home_scroll_target != previous_home {
             self.dirty = true;
         }
-        // Only the Home strip changes the geometry it is drawn with. The vertical list moves
-        // through `scroll_target`, which the frame loop eases, so asking for a second compose
-        // here would build the same scene twice for every off-screen row.
-        self.home_scroll != previous_home
+        // Both lists glide to a target the frame loop eases, so the scene built at the
+        // current drawn position is already the right one to paint this frame; asking for a
+        // second compose here would build the same scene twice for every off-screen row or
+        // card. Only a strip that lands at once - Reduced Motion, or the clamp after the
+        // favourites themselves changed - alters the geometry it is drawn with mid-reveal.
+        self.home_scroll != drawn_home
     }
 
     /// Hover and pointer-down must not move the control before pointer-up.
