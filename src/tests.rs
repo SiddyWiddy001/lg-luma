@@ -29,7 +29,7 @@ fn home_relaunch_returns_from_apps_and_settings() {
         state.open(page);
         state.query = "YouTube".into();
         state.filter = 1;
-        state.scroll = 400.;
+        state.jump_scroll(400.);
         state.subpage = Some(crate::state::Subpage::Clock);
         state.pointer = true;
         state.pressed = Some(Target::Nav(page));
@@ -475,6 +475,7 @@ fn gallery_and_grid_navigation_scroll_to_keep_focus_visible() {
     assert_eq!(state.scroll, 0., "the first three gallery rows fit");
     state.direction(Direction::Down, &controls(&state));
     assert_eq!(state.focus, Target::Background(9));
+    state.settle_scroll();
     assert!(state.scroll > 0., "the fourth gallery row must scroll");
     let control = controls(&state)
         .into_iter()
@@ -488,9 +489,65 @@ fn gallery_and_grid_navigation_scroll_to_keep_focus_visible() {
     state.open(1);
     let last = state.apps().last().unwrap().id.clone();
     state.focus(Target::App(last), &controls(&state));
+    state.settle_scroll();
     assert!(
         state.scroll > 0.,
         "library focus includes its wrapped caption"
+    );
+}
+
+#[test]
+fn revealing_an_offscreen_row_glides_the_list_to_it() {
+    let mut state = ready();
+    state.open(1);
+    let last = state.apps().last().unwrap().id.clone();
+    state.focus(Target::App(last), &controls(&state));
+    assert!(state.scroll_target > 0., "the last row needs the list moved");
+    assert_eq!(state.scroll, 0., "the list is still drawn where it was");
+    assert!(state.animating(), "a gliding list keeps the loop painting");
+    // The same smoothing step the frame loop applies at about 60 fps.
+    for _ in 0..40 {
+        if !state.ease_scroll(0.28, false) {
+            break;
+        }
+    }
+    assert_eq!(state.scroll, state.scroll_target, "the glide settles");
+    assert!(!state.animating(), "a settled list stops asking for frames");
+    let focused = controls(&state)
+        .into_iter()
+        .find(|c| c.target == state.focus)
+        .unwrap();
+    let viewport = state.apps_viewport();
+    assert!(focused.rect.y >= viewport.y);
+    assert!(focused.rect.y + focused.rect.h <= viewport.y + viewport.h);
+}
+
+#[test]
+fn reduced_motion_reveals_a_row_without_a_glide() {
+    let mut state = ready();
+    state.preferences.reduced_motion = true;
+    state.open(1);
+    let last = state.apps().last().unwrap().id.clone();
+    state.focus(Target::App(last), &controls(&state));
+    assert!(state.scroll > 0., "Reduced Motion lands on the row at once");
+    assert_eq!(state.scroll, state.scroll_target);
+    assert!(!state.animating());
+}
+
+#[test]
+fn repeat_presses_during_a_glide_reveal_the_same_row() {
+    let mut state = ready();
+    state.open(1);
+    let last = state.apps().last().unwrap().id.clone();
+    state.focus(Target::App(last.clone()), &controls(&state));
+    let settled = state.scroll_target;
+    assert!(settled > 0.);
+    state.ease_scroll(0.28, false);
+    assert!(state.scroll < state.scroll_target, "the list is still gliding");
+    state.focus(Target::App(last), &controls(&state));
+    assert!(
+        (state.scroll_target - settled).abs() < 0.01,
+        "pressing again mid-glide must not slide the grid again"
     );
 }
 
@@ -510,7 +567,7 @@ fn cancelling_options_preserves_identity_and_does_not_save() {
 fn pointer_focus_does_not_scroll_the_clicked_control() {
     let mut state = ready();
     state.open(1);
-    state.scroll = 150.;
+    state.jump_scroll(150.);
     state.pointer_focus(Target::App("netflix".into()));
     assert_eq!(state.scroll, 150.);
     state.focus(Target::Nav(1), &controls(&state));
@@ -1448,7 +1505,7 @@ fn failed_deletion_refreshes_inventory_and_closes_stale_confirmation() {
 fn remote_toolbar_focus_normalizes_scroll_but_hover_does_not() {
     let mut state = ready();
     state.open(1);
-    state.scroll = 100.;
+    state.jump_scroll(100.);
     state.pointer_focus(Target::Filter(1));
     assert_eq!(state.scroll, 100.);
     state.focus(Target::Filter(2), &controls(&state));
@@ -1663,6 +1720,7 @@ fn remote_can_select_and_restore_every_language() {
             state.direction(Direction::Down, &controls(&state));
         }
         assert_eq!(state.focus, Target::Choice(index));
+        state.settle_scroll();
         let focused = controls(&state)
             .into_iter()
             .find(|control| control.target == state.focus)
@@ -2498,6 +2556,7 @@ fn shortcut_list_scroll_and_pointer_focus_preserve_control_positions() {
         state.direction(Direction::Down, &controls(&state));
     }
     assert_eq!(state.focus, Target::Tile("custom.tile-19".into()));
+    state.settle_scroll();
     assert!(state.scroll > 0.);
     let before: Vec<_> = controls(&state)
         .iter()
@@ -2550,6 +2609,7 @@ fn settings_lists_keep_bottom_padding_for_remote_and_wheel_scrolling() {
         };
         state.focus = last.clone();
         state.reveal_focus(&controls(&state));
+        state.settle_scroll();
         let bottom =
             state.content_viewport().y + state.content_viewport().h - SETTINGS_LIST_BOTTOM_PADDING;
         let rect = controls(&state)
@@ -2575,7 +2635,7 @@ fn language_list_scrolls_under_fixed_ui_without_clipping_or_fades() {
     state.preferences.reduced_motion = true;
     state.open(2);
     state.subpage = Some(Subpage::Language);
-    state.scroll = 180.;
+    state.jump_scroll(180.);
     let rendered = scene(&state);
     assert!(!rendered.draw.iter().any(|draw| matches!(
         draw,
@@ -2626,7 +2686,7 @@ fn apps_scroll_behind_navigation_without_a_top_cutoff_or_fade() {
     use crate::renderer::Draw;
     let mut state = ready();
     state.open(1);
-    state.scroll = 400.;
+    state.jump_scroll(400.);
     let rendered = scene(&state);
     assert!(!rendered.draw.iter().any(|draw| matches!(
         draw,
@@ -2673,7 +2733,7 @@ fn apps_toolbar_stays_fixed_above_scrolling_cards_and_keeps_pointer_priority() {
             state.query = "n".into();
         }
         let before = controls(&state);
-        state.scroll = 200.;
+        state.jump_scroll(200.);
         let rendered = scene(&state);
         for control in before.iter().filter(|control| {
             matches!(
@@ -2707,6 +2767,7 @@ fn apps_toolbar_stays_fixed_above_scrolling_cards_and_keeps_pointer_priority() {
         assert_eq!(first.rect.y - scrolled.rect.y, state.scroll);
         state.focus = first.target.clone();
         state.reveal_focus(&rendered.controls);
+        state.settle_scroll();
         let revealed = controls(&state)
             .into_iter()
             .find(|control| control.target == first.target)

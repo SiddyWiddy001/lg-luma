@@ -229,7 +229,12 @@ pub struct State {
     pub filter: usize,
     pub section: usize,
     pub subpage: Option<Subpage>,
+    /// Where the scrolling list is drawn. The frame loop eases it toward `scroll_target`, so
+    /// revealing a row that does not fit on screen glides instead of jumping.
     pub scroll: f32,
+    /// The settled position the list is heading for: the top of the content, plus the amount
+    /// needed to keep the focused control inside the viewport.
+    pub scroll_target: f32,
     pub home_scroll: f32,
     pub overlay: Option<Overlay>,
     pub moving: Option<String>,
@@ -286,6 +291,7 @@ impl State {
             section: 0,
             subpage: None,
             scroll: 0.,
+            scroll_target: 0.,
             home_scroll: 0.,
             overlay: None,
             moving: None,
@@ -455,6 +461,10 @@ impl State {
                 || self.recents.cards_animating(self.pointer)))
             || self.previous_background.is_some()
             || self.panel_started.is_some()
+            // A list still gliding to the revealed row. The frame loop does the easing, so the
+            // wake decision here is what keeps it painted instead of falling back to the idle
+            // wait and jumping the rest of the way.
+            || self.scroll != self.scroll_target
             || (!self.preferences.reduced_motion
                 && self
                     .notice
@@ -484,7 +494,7 @@ impl State {
             _ => Page::Home,
         };
         self.focus = Target::Nav(self.page_index());
-        self.scroll = 0.;
+        self.jump_scroll(0.);
         if self.page == Page::Home {
             self.scroll_favorites(0.);
         }
@@ -625,7 +635,12 @@ impl State {
                 })
                 .map(|c| c.rect.y + c.rect.h + self.scroll - bottom)
                 .fold(0., f32::max);
-            self.scroll = (self.scroll - y as f32 * 90.).clamp(0., max.max(0.));
+            // A wheel turn is direct manipulation, so it moves the list right now rather than
+            // easing to it, and it accumulates from where the list is drawn so a turn during a
+            // glide takes over from the visible position.
+            let next = (self.scroll - y as f32 * 90.).clamp(0., max.max(0.));
+            self.scroll = next;
+            self.scroll_target = next;
         }
         self.pointer = true;
         self.dirty = true;
@@ -684,7 +699,7 @@ impl State {
                 || matches!(&self.focus, Target::InputMode(id) if missing(id)))
         {
             self.subpage = Some(Subpage::Inputs);
-            self.scroll = 0.;
+            self.jump_scroll(0.);
             self.focus = self
                 .inventory
                 .inputs
@@ -782,10 +797,46 @@ impl State {
         self.dirty = true;
     }
 
+    /// Moves the list to a position without easing. Used when the list itself changes - a
+    /// page, section, subpage, filter or search - where sliding the old content away would
+    /// just be noise, and by tests and the pointer wheel that want the position now.
+    pub fn jump_scroll(&mut self, value: f32) {
+        self.scroll = value;
+        self.scroll_target = value;
+    }
+
+    /// Stops the list where it was heading, skipping the glide.
+    pub fn settle_scroll(&mut self) {
+        self.scroll = self.scroll_target;
+    }
+
+    /// Eases the drawn list toward `scroll_target`. `step` is the same smoothing factor the
+    /// frame loop uses for the nav pill, so the grid and the pill move together. Returns
+    /// whether the list moved, which is how the loop knows to keep painting.
+    pub fn ease_scroll(&mut self, step: f32, reduced_motion: bool) -> bool {
+        if self.scroll == self.scroll_target {
+            return false;
+        }
+        self.scroll = if reduced_motion {
+            self.scroll_target
+        } else {
+            let next = self.scroll + (self.scroll_target - self.scroll) * step;
+            // The last half pixel is invisible, and leaving a fractional remainder would keep
+            // the frame loop painting a list that has effectively stopped moving.
+            if (self.scroll_target - next).abs() < 0.5 {
+                self.scroll_target
+            } else {
+                next
+            }
+        };
+        self.dirty = true;
+        true
+    }
+
     /// Remote focus is revealed after layout changes, including hide/reorder.
     /// Pointer paths deliberately do not call this method.
     pub fn reveal_focus(&mut self, controls: &[Control]) -> bool {
-        let previous = self.scroll;
+        let previous = self.scroll_target;
         let previous_home = self.home_scroll;
         if let Some(control) = controls.iter().find(|c| c.target == self.focus) {
             if self.page == Page::Home && matches!(self.focus, Target::App(_)) {
@@ -804,7 +855,7 @@ impl State {
                     | Target::ClearSearch
                     | Target::Sidebar(_)
             ) {
-                self.scroll = 0.;
+                self.jump_scroll(0.);
             } else if control.scrollable {
                 let top = if matches!(self.focus, Target::Background(_)) {
                     self.backgrounds_viewport().y + 8.
@@ -813,22 +864,39 @@ impl State {
                 } else {
                     120.8
                 };
-                if control.rect.y < top {
-                    self.scroll = (self.scroll + control.rect.y - top).max(0.);
+                // `control.rect` sits at the eased scroll, which trails the target while a
+                // reveal is still gliding. Undoing that offset gives the control's position in
+                // the unscrolled list, so repeated presses land on the same target instead of
+                // accumulating the error between the two.
+                let unscrolled = control.rect.y + self.scroll;
+                // Both tests are made against where the control will sit once the list has
+                // settled, otherwise a press during a glide could leave it tucked under the
+                // header or below the bottom edge when the easing finishes.
+                let settled = unscrolled - self.scroll_target;
+                if settled < top {
+                    self.scroll_target = (unscrolled - top).max(0.);
                 }
                 let bottom = self.scroll_bottom();
-                if control.rect.y + control.rect.h > bottom {
-                    self.scroll += control.rect.y + control.rect.h - bottom;
+                if unscrolled - self.scroll_target + control.rect.h > bottom {
+                    self.scroll_target = unscrolled + control.rect.h - bottom;
                 }
             }
         }
         if self.page == Page::Home {
             self.scroll_favorites(0.);
         }
-        if self.scroll != previous || self.home_scroll != previous_home {
+        // Reduced Motion never glides, so the list is already where it is heading and the
+        // frame loop has nothing left to ease.
+        if self.preferences.reduced_motion {
+            self.settle_scroll();
+        }
+        if self.scroll_target != previous || self.home_scroll != previous_home {
             self.dirty = true;
         }
-        self.scroll != previous || self.home_scroll != previous_home
+        // Only the Home strip changes the geometry it is drawn with. The vertical list moves
+        // through `scroll_target`, which the frame loop eases, so asking for a second compose
+        // here would build the same scene twice for every off-screen row.
+        self.home_scroll != previous_home
     }
 
     /// Hover and pointer-down must not move the control before pointer-up.
@@ -845,7 +913,7 @@ impl State {
                 self.weather.cancel_search();
             }
             if self.section != section || self.subpage.is_some() {
-                self.scroll = 0.;
+                self.jump_scroll(0.);
             }
             self.section = section;
             self.subpage = None;
@@ -1051,7 +1119,7 @@ impl State {
             Some(Subpage::TextRendering) => Target::Setting(7),
             None => Target::Sidebar(self.section),
         };
-        self.scroll = 0.;
+        self.jump_scroll(0.);
         self.dirty = true;
     }
 
@@ -1738,7 +1806,7 @@ impl State {
                     .filter(|c| !c.is_control())
                     .take(120usize.saturating_sub(self.query.chars().count())),
             );
-            self.scroll = 0.;
+            self.jump_scroll(0.);
             self.dirty = true;
         }
     }
@@ -1892,7 +1960,7 @@ impl State {
             self.input_name = query;
         } else {
             self.query = query;
-            self.scroll = 0.;
+            self.jump_scroll(0.);
         }
         self.dirty = true;
     }
@@ -1942,7 +2010,7 @@ impl State {
         self.weather.edit(String::new());
         self.subpage = Some(Subpage::WeatherLocation);
         self.focus = Target::WeatherQuery;
-        self.scroll = 0.;
+        self.jump_scroll(0.);
         if !self.preferences.reduced_motion {
             self.panel_started = Some(Instant::now());
         }
@@ -2016,17 +2084,17 @@ impl State {
             }
             Target::Filter(index) => {
                 self.filter = if self.filter == index { 0 } else { index };
-                self.scroll = 0.;
+                self.jump_scroll(0.);
             }
             Target::ClearFilter => {
                 self.filter = 0;
                 self.focus = Target::Filter(1);
-                self.scroll = 0.;
+                self.jump_scroll(0.);
             }
             Target::ClearSearch => {
                 self.query.clear();
                 self.focus = Target::Search;
-                self.scroll = 0.;
+                self.jump_scroll(0.);
             }
             Target::Search => {
                 self.open_keyboard(TextField::Apps);
@@ -2064,7 +2132,7 @@ impl State {
             Target::DateFormat => {
                 self.subpage = Some(Subpage::DateFormat);
                 self.focus = Target::Choice(self.preferences.date_format.index());
-                self.scroll = 0.;
+                self.jump_scroll(0.);
                 if !self.preferences.reduced_motion {
                     self.panel_started = Some(Instant::now());
                 }
@@ -2095,7 +2163,7 @@ impl State {
                 } else {
                     self.preferences.show_seconds
                 }));
-                self.scroll = 0.;
+                self.jump_scroll(0.);
                 if !self.preferences.reduced_motion {
                     self.panel_started = Some(Instant::now());
                 }
@@ -2120,7 +2188,7 @@ impl State {
                 self.section = WIDGETS_SECTION;
                 self.subpage = Some(subpage);
                 self.focus = focus;
-                self.scroll = 0.;
+                self.jump_scroll(0.);
                 if !self.preferences.reduced_motion {
                     self.panel_started = Some(Instant::now());
                 }
@@ -2162,7 +2230,7 @@ impl State {
                     );
                     self.subpage = Some(Subpage::Shortcuts);
                     self.panel_started = None;
-                    self.scroll = 0.;
+                    self.jump_scroll(0.);
                     self.sync_custom_tiles();
                     self.focus = Target::TileEditor;
                     return vec![Effect::Save];
@@ -2200,7 +2268,7 @@ impl State {
             }
             Target::Sidebar(index) => {
                 self.section = index;
-                self.scroll = 0.;
+                self.jump_scroll(0.);
                 self.subpage = None;
                 self.focus = self.section_entry();
             }
@@ -2209,7 +2277,7 @@ impl State {
                     0 => {
                         self.subpage = Some(Subpage::AppNames);
                         self.focus = Target::AppNamesHome;
-                        self.scroll = 0.;
+                        self.jump_scroll(0.);
                         if !self.preferences.reduced_motion {
                             self.panel_started = Some(Instant::now());
                         }
@@ -2217,7 +2285,7 @@ impl State {
                     }
                     1 => {
                         self.subpage = Some(Subpage::Clock);
-                        self.scroll = 0.;
+                        self.jump_scroll(0.);
                         if !self.preferences.reduced_motion {
                             self.panel_started = Some(Instant::now());
                         }
@@ -2237,7 +2305,7 @@ impl State {
                     7 => {
                         self.subpage = Some(Subpage::TextRendering);
                         self.focus = Target::Choice(self.preferences.text_rendering.index());
-                        self.scroll = 0.;
+                        self.jump_scroll(0.);
                         if !self.preferences.reduced_motion {
                             self.panel_started = Some(Instant::now());
                         }
@@ -2564,13 +2632,13 @@ impl State {
             } else {
                 self.focus = Target::Sidebar(self.section);
             }
-            self.scroll = 0.;
+            self.jump_scroll(0.);
             return vec![];
         }
         if self.page == Page::Apps && matches!(self.focus, Target::Search | Target::ClearSearch) {
             self.query.clear();
             self.focus = Target::Nav(1);
-            self.scroll = 0.;
+            self.jump_scroll(0.);
             return vec![];
         }
         if self.page != Page::Home {

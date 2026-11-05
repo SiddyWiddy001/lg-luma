@@ -16,7 +16,7 @@ fn upload_sits_left_of_rotation_and_both_remain_fixed_in_every_language() {
     state.section = 1;
     for language in crate::i18n::Language::ALL {
         state.preferences.language = language;
-        state.scroll = 0.;
+        state.jump_scroll(0.);
         let before = controls(&state);
         let cycle = before
             .iter()
@@ -44,7 +44,7 @@ fn upload_sits_left_of_rotation_and_both_remain_fixed_in_every_language() {
         assert_eq!(gradient.x + gradient.w + 20., cinematic.x);
         assert_eq!(cinematic.x + cinematic.w + 20., cycle.x);
         assert_eq!(cycle.y, upload.y);
-        state.scroll = 500.;
+        state.jump_scroll(500.);
         let after = controls(&state);
         for target in [
             Target::WallpaperCycle,
@@ -85,7 +85,7 @@ fn cycling_button_toggles_on_off_without_opening_a_page_or_moving_controls() {
     state.direction(Direction::Right, &controls(&state));
     state.direction(Direction::Right, &controls(&state));
     assert!(!state.preferences.wallpaper_cycle);
-    state.scroll = 300.;
+    state.jump_scroll(300.);
     for language in crate::i18n::Language::ALL {
         state.preferences.language = language;
         let before = controls(&state);
@@ -154,7 +154,7 @@ fn gradient_toggle_is_saved_stable_and_switches_bundled_and_uploaded_images() {
     state.open(2);
     state.section = 1;
     state.focus = Target::WallpaperGradient;
-    state.scroll = 300.;
+    state.jump_scroll(300.);
     let defaults: crate::model::Preferences = serde_json::from_str("{}").unwrap();
     assert!(defaults.wallpaper_gradient);
     for language in crate::i18n::Language::ALL {
@@ -494,7 +494,7 @@ fn scrolled_backgrounds_cannot_capture_upload_or_sidebar_pointer_hits() {
     let mut state = ready();
     state.open(2);
     state.section = 1;
-    state.scroll = 150.;
+    state.jump_scroll(150.);
     let gallery = controls(&state);
     let upload = gallery
         .iter()
@@ -527,9 +527,12 @@ fn remote_background_focus_stays_below_the_fixed_upload_action() {
     for _ in 0..5 {
         state.direction(Direction::Down, &controls(&state));
     }
+    state.settle_scroll();
     assert!(state.scroll > 0.);
     for _ in 0..5 {
         state.direction(Direction::Up, &controls(&state));
+        // Reveal moves the position the app eases toward; these checks want where it ends up.
+        state.settle_scroll();
         if matches!(state.focus, Target::Background(_)) {
             let gallery = controls(&state);
             let focused = gallery.iter().find(|c| c.target == state.focus).unwrap();
@@ -562,6 +565,7 @@ fn custom_gallery_navigation_reveals_whole_cards_in_incomplete_rows() {
     assert_eq!(state.focus, Target::Background(7));
     state.direction(Direction::Down, &controls(&state));
     assert_eq!(state.focus, Target::Background(10));
+    state.settle_scroll();
     let focused = controls(&state)
         .into_iter()
         .find(|c| c.target == state.focus)
