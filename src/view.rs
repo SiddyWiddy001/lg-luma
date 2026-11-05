@@ -256,17 +256,19 @@ impl Scene {
     /// Focus bloom behind a card: light bleeds out from behind the glass, and the tile is
     /// painted over it, leaving only the halo outside its edges. One continuous exponential
     /// falloff instead of stacked flat-alpha rings: five rings stepped hard at 6/12/20/30 px,
-    /// which read as concentric bands on a dark wallpaper. The halo is full strength inside the
-    /// rect, matching what the five rings composited to, so the translucent plate is lit exactly
-    /// as before. The focused card is drawn last by the page, so no neighbour paints over it.
+    /// which read as concentric bands on a dark wallpaper. It runs a little weaker than the
+    /// rings it replaced and decays faster, so the bloom hugs the card rather than washing the
+    /// wallpaper around it. The focused card is drawn last by the page, so no neighbour paints
+    /// over it.
     fn glow(&mut self, rect: Rect, radius: f32, intensity: f32) {
         // Keep the falloff inside the card on small surfaces: half_size - blur must stay
         // positive in the shader's rounded-rect distance field.
         let blur = 60.0f32.min(rect.w * 0.45).min(rect.h * 0.45);
-        // 0.49 at the edge matches what the five rings composited to, and the shader's
-        // hold-then-decay curve passes through their alpha at 6/12/20/30/42 px.
+        // 0.42 at the quad's edge. The five rings composited to 0.49, which read as too hot on
+        // the panel, and the shader's decay is steeper than the ring steps too, so the halo
+        // fades away within a few pixels instead of carrying that brightness outward.
         self.draw
-            .push(Draw::Glow(rect, radius, blur, c(0xe8eef8, 0.49 * intensity)));
+            .push(Draw::Glow(rect, radius, blur, c(0xe8eef8, 0.42 * intensity)));
     }
     fn shadow(&mut self, rect: Rect, radius: f32, blur: f32, y: f32, alpha: f32) {
         self.draw.push(Draw::Shadow(

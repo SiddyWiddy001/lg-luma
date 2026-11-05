@@ -47,11 +47,13 @@ void main() {
         if (glow) {
             // Full strength inside the card and out to `hold`, then a smooth exponential
             // decay. The stacked flat-alpha rings this replaced stepped hard every few pixels
-            // and banded; this curve passes through the same alpha at each old ring edge.
-            // Subtracting the residual at the quad's edge keeps the halo at exactly zero
-            // where the geometry ends, so the cutoff cannot show as a faint ring.
+            // and banded; this curve is deliberately weaker than they were, both at the card
+            // edge and as it falls off, so the halo stays close to the tile instead of
+            // brightening the wallpaper around it. Subtracting the residual at the quad's edge
+            // keeps the halo at exactly zero where the geometry ends, so the cutoff cannot show
+            // as a faint ring.
             float hold = blur * 0.1;
-            float decay = max(blur * 0.2667, 0.001);
+            float decay = max(blur * 0.2, 0.001);
             float edge = exp(-max(blur - hold, 0.0) / decay);
             alpha = (exp(-max(d - hold, 0.0) / decay) - edge) / (1.0 - edge);
         } else {
