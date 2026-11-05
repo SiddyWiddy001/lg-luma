@@ -71,6 +71,10 @@ pub enum Draw {
     Image(String, Rect, f32, bool),
     TintedImage(String, Rect, f32, bool, Color),
     /// Installed icon and its backdrop, composited before opacity and edge fading.
+    /// The glass plate paints the icon alone over its own gradient (`AppIcon`), so this
+    /// composited path is unused here. It is kept, with its renderer support and tests, so the
+    /// upstream look can be restored without rebuilding the artwork decode.
+    #[allow(dead_code)]
     AppImage(Arc<crate::app_artwork::Artwork>, Rect, f32, Color),
     /// Installed icon alone, alpha preserved, drawn over a caller-painted plate.
     AppIcon(Arc<crate::app_artwork::Artwork>, Rect, Color),

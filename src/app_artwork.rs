@@ -79,7 +79,10 @@ pub struct Artwork {
 }
 
 impl Artwork {
-    /// The badge sits outside the inset icon, directly over this card gradient.
+    /// The badge sits outside the inset icon, directly over this card gradient. Nothing reads it
+    /// now that the plate pins a white badge, but the contrast rule stays tested so a restored
+    /// composited surface picks the same colour.
+    #[allow(dead_code)]
     pub fn dark_badge(&self, y: f32) -> bool {
         let y = y.clamp(0., 1.);
         let rgb = std::array::from_fn(|i| {
