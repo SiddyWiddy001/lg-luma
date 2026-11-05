@@ -664,7 +664,11 @@ impl Renderer {
         let rect = self.snap(rect);
         let start = self.vertices.len() / 14;
         // A glow's half sizes are negative: paint.frag uses that as the halo flag.
-        let half = if matches!(mode, PaintMode::Glow) { -0.5 } else { 0.5 };
+        let half = if matches!(mode, PaintMode::Glow) {
+            -0.5
+        } else {
+            0.5
+        };
         for (x, y) in [(0., 0.), (1., 0.), (0., 1.), (0., 1.), (1., 0.), (1., 1.)] {
             let color = colors[y as usize];
             self.vertices.extend_from_slice(&[
@@ -1104,11 +1108,8 @@ impl Renderer {
             .or_insert_with(|| match image::open(&path) {
                 Ok(image) => {
                     let image = image.into_rgba8();
-                    let target = crate::resample::screen_upload_size(
-                        image.width(),
-                        image.height(),
-                        cap,
-                    );
+                    let target =
+                        crate::resample::screen_upload_size(image.width(), image.height(), cap);
                     Some(upload(
                         image.width(),
                         image.height(),
@@ -2026,13 +2027,7 @@ fn texture(width: u32, height: u32, pixels: &[u8], cap: (u32, u32)) -> Texture {
 /// is bigger than the largest size this image is ever drawn at. The pixel format stays RGBA8, so
 /// colours are not re-quantised and edges keep the same look; only the texel count - and the GPU's
 /// per-frame downscaling work - goes away.
-fn upload(
-    width: u32,
-    height: u32,
-    pixels: &[u8],
-    target: (u32, u32),
-    cap: (u32, u32),
-) -> Texture {
+fn upload(width: u32, height: u32, pixels: &[u8], target: (u32, u32), cap: (u32, u32)) -> Texture {
     if target == (width, height) {
         return texture(width, height, pixels, cap);
     }

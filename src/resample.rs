@@ -55,10 +55,7 @@ fn taps(index: u32, source_len: u32, target_len: u32) -> Vec<Tap> {
             continue;
         }
         total += weight;
-        weighted.push((
-            offset.clamp(0, i64::from(source_len) - 1) as usize,
-            weight,
-        ));
+        weighted.push((offset.clamp(0, i64::from(source_len) - 1) as usize, weight));
     }
     if total == 0. {
         // A source with a single sample, or a window that fell entirely between two.
@@ -173,7 +170,9 @@ pub fn lanczos3_rgba(
     target_height: u32,
 ) -> Vec<u8> {
     let stride = width as usize * 4;
-    let rows: Vec<Vec<Tap>> = (0..target_height).map(|row| taps(row, height, target_height)).collect();
+    let rows: Vec<Vec<Tap>> = (0..target_height)
+        .map(|row| taps(row, height, target_height))
+        .collect();
     let mut middle = vec![0; stride * target_height as usize];
     for (row, row_taps) in rows.iter().enumerate() {
         for column in 0..width as usize {
@@ -185,8 +184,9 @@ pub fn lanczos3_rgba(
     // The column taps are the same for every row, so they are computed once. Here successive
     // samples are neighbouring pixels in one row, four bytes apart, and the tap index already
     // names the source column, so the offset is only the row's start.
-    let columns: Vec<Vec<Tap>> =
-        (0..target_width).map(|column| taps(column, width, target_width)).collect();
+    let columns: Vec<Vec<Tap>> = (0..target_width)
+        .map(|column| taps(column, width, target_width))
+        .collect();
     let target_stride = target_width as usize * 4;
     let mut out = vec![0; target_stride * target_height as usize];
     for row in 0..target_height as usize {

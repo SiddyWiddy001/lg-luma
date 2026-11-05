@@ -1813,9 +1813,9 @@ fn run() -> Result<(), String> {
                     tile_motion = true;
                 }
             }
-            state.app_lift.retain(|id, value| {
-                *value > 0.003 || Some(id.as_str()) == focused_app.as_deref()
-            });
+            state
+                .app_lift
+                .retain(|id, value| *value > 0.003 || Some(id.as_str()) == focused_app.as_deref());
             // The zoom freezes the squeeze: the card stays pinched behind the flying icon
             // instead of popping back to full size, and eases back once the zoom is over.
             if state.launch_zoom.is_none() {

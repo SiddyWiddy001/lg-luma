@@ -250,8 +250,18 @@ impl Scene {
         // is drawn on the card's own rect, so focus moves with the selection instead of an
         // outline sliding across the screen, and `intensity` fades it in and out. The wide
         // bleed comes from glow() behind the tile, not from these two strokes.
-        self.border(rect.inset(-2.6), radius + 2.6, 5.2, c(0xeaf2ff, 0.22 * intensity));
-        self.border(rect.inset(-1.2), radius + 1.2, 2.2, c(0xffffff, 0.55 * intensity));
+        self.border(
+            rect.inset(-2.6),
+            radius + 2.6,
+            5.2,
+            c(0xeaf2ff, 0.22 * intensity),
+        );
+        self.border(
+            rect.inset(-1.2),
+            radius + 1.2,
+            2.2,
+            c(0xffffff, 0.55 * intensity),
+        );
     }
     /// Focus bloom behind a card: light bleeds out from behind the glass, and the tile is
     /// painted over it, leaving only the halo outside its edges. One continuous exponential
@@ -267,8 +277,12 @@ impl Scene {
         // 0.42 at the quad's edge. The five rings composited to 0.49, which read as too hot on
         // the panel, and the shader's decay is steeper than the ring steps too, so the halo
         // fades away within a few pixels instead of carrying that brightness outward.
-        self.draw
-            .push(Draw::Glow(rect, radius, blur, c(0xe8eef8, 0.42 * intensity)));
+        self.draw.push(Draw::Glow(
+            rect,
+            radius,
+            blur,
+            c(0xe8eef8, 0.42 * intensity),
+        ));
     }
     fn shadow(&mut self, rect: Rect, radius: f32, blur: f32, y: f32, alpha: f32) {
         self.draw.push(Draw::Shadow(
@@ -762,27 +776,27 @@ pub fn scene_with_pill(
         if let Some(app) = state.inventory.apps.iter().find(|item| item.id == zoom.app) {
             let elapsed = zoom.started.elapsed().as_secs_f32();
             let t = (elapsed / crate::state::LAUNCH_ZOOM).min(1.);
-            let source =
-                out.launch_source
-                    .map(|[x, y, w, h]| Rect::new(x, y, w, h))
-                    .unwrap_or_else(|| {
-                        out.controls
-                            .iter()
-                            .find(|control| control.target == Target::App(app.id.clone()))
-                            .map(|control| {
-                                let mut rect = control.rect;
-                                let names = if state.page == Page::Home {
-                                    state.preferences.show_home_names
-                                } else {
-                                    state.preferences.show_app_names
-                                };
-                                if names {
-                                    rect.h -= 18.4 + caption_height(state, assets, app, rect.w);
-                                }
-                                rect
-                            })
-                            .unwrap_or(Rect::new(830., 410., 260., 260.))
-                    });
+            let source = out
+                .launch_source
+                .map(|[x, y, w, h]| Rect::new(x, y, w, h))
+                .unwrap_or_else(|| {
+                    out.controls
+                        .iter()
+                        .find(|control| control.target == Target::App(app.id.clone()))
+                        .map(|control| {
+                            let mut rect = control.rect;
+                            let names = if state.page == Page::Home {
+                                state.preferences.show_home_names
+                            } else {
+                                state.preferences.show_app_names
+                            };
+                            if names {
+                                rect.h -= 18.4 + caption_height(state, assets, app, rect.w);
+                            }
+                            rect
+                        })
+                        .unwrap_or(Rect::new(830., 410., 260., 260.))
+                });
             // Ease-out cubic: fast at the start of the launch, decelerating as it fades.
             let ease = 1. - (1. - t).powi(3);
             let scale = 1. + 1.5 * ease;
@@ -954,7 +968,11 @@ fn tile(
         rect
     };
     let radius = squircle(face);
-    if state.launch_zoom.as_ref().is_some_and(|zoom| zoom.app == app.id) {
+    if state
+        .launch_zoom
+        .as_ref()
+        .is_some_and(|zoom| zoom.app == app.id)
+    {
         // The launch zoom starts from this exact face, so the flying icon lines up with the
         // tile it came from instead of guessing at a layout position.
         out.launch_source = Some([face.x, face.y, face.w, face.h]);
@@ -1100,7 +1118,8 @@ fn app_face(
         for channel in &mut bottom[..3] {
             *channel *= warm;
         }
-        out.draw.push(Draw::RoundedGradient(rect, radius, top, bottom));
+        out.draw
+            .push(Draw::RoundedGradient(rect, radius, top, bottom));
         out.border(rect, radius, 3., c(0xffffff, 0.06));
         out.border(rect, radius, 1., c(0xffffff, 0.24));
     }
@@ -1115,7 +1134,8 @@ fn app_face(
     let art_start = out.draw.len();
     if let Some(image) = artwork {
         // Inset so the glass shows around the icon; the icon keeps its own alpha here.
-        out.draw.push(Draw::AppIcon(image, rect.inset(rect.h * 0.11), [1.; 4]));
+        out.draw
+            .push(Draw::AppIcon(image, rect.inset(rect.h * 0.11), [1.; 4]));
     }
     if let Some(brand) = logo {
         let (ratio, height) = brand.artwork_size();

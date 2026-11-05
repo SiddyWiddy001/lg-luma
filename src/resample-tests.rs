@@ -17,7 +17,10 @@ fn flat(width: u32, height: u32) -> Vec<u8> {
 fn tap_weights_sum_to_one_pixel() {
     for (source, target) in [(2_560, 2_016), (1_707, 1_134), (512, 512), (3, 2), (1, 1)] {
         for index in 0..target {
-            let sum: i32 = taps(index, source, target).iter().map(|tap| tap.weight).sum();
+            let sum: i32 = taps(index, source, target)
+                .iter()
+                .map(|tap| tap.weight)
+                .sum();
             assert_eq!(sum, SCALE as i32, "{source} -> {target} at {index}");
         }
     }
@@ -26,10 +29,19 @@ fn tap_weights_sum_to_one_pixel() {
 #[test]
 fn resampling_a_flat_colour_keeps_it_exact() {
     for (source, target) in [(8, 8), (8, 5), (5, 8), (16, 1), (1, 16)] {
-        let out = lanczos3_rgba(&flat(source.0, source.1), source.0, source.1, target.0, target.1);
+        let out = lanczos3_rgba(
+            &flat(source.0, source.1),
+            source.0,
+            source.1,
+            target.0,
+            target.1,
+        );
         assert_eq!(out.len(), (target.0 * target.1 * 4) as usize);
         let shifted = out.chunks(4).find(|pixel| *pixel != [128, 61, 199, 128]);
-        assert_eq!(shifted, None, "{source:?} -> {target:?} shifted a flat colour");
+        assert_eq!(
+            shifted, None,
+            "{source:?} -> {target:?} shifted a flat colour"
+        );
     }
 }
 
@@ -43,7 +55,10 @@ fn identity_resampling_changes_nothing() {
 
 #[test]
 fn screen_uploads_never_grow_an_image() {
-    assert_eq!(screen_upload_size(2_560, 1_707, (2_048, 1_152)), (2_048, 1_152));
+    assert_eq!(
+        screen_upload_size(2_560, 1_707, (2_048, 1_152)),
+        (2_048, 1_152)
+    );
     assert_eq!(screen_upload_size(900, 600, (2_048, 1_152)), (900, 600));
     // One axis over the limit still leaves the other alone: the wallpaper is stretched to fill,
     // so clamping the axes separately is what keeps it covering the screen.
@@ -57,7 +72,10 @@ fn artwork_uploads_keep_their_aspect_ratio_when_shrunk() {
     assert_eq!((width, height), (1_024, 512));
     assert_eq!(artwork_upload_size(256, 256, (1_024, 1_024)), (256, 256));
     // Never scaled up, and never rounded away to nothing.
-    assert_eq!(artwork_upload_size(1_024, 1_024, (1_200, 1_200)), (1_024, 1_024));
+    assert_eq!(
+        artwork_upload_size(1_024, 1_024, (1_200, 1_200)),
+        (1_024, 1_024)
+    );
     assert_eq!(artwork_upload_size(8_192, 1, (1_024, 1_024)), (1_024, 1));
 }
 

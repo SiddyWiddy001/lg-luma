@@ -502,7 +502,10 @@ fn revealing_an_offscreen_row_glides_the_list_to_it() {
     state.open(1);
     let last = state.apps().last().unwrap().id.clone();
     state.focus(Target::App(last), &controls(&state));
-    assert!(state.scroll_target > 0., "the last row needs the list moved");
+    assert!(
+        state.scroll_target > 0.,
+        "the last row needs the list moved"
+    );
     assert_eq!(state.scroll, 0., "the list is still drawn where it was");
     assert!(state.animating(), "a gliding list keeps the loop painting");
     // The same smoothing step the frame loop applies at about 60 fps.
@@ -543,7 +546,10 @@ fn repeat_presses_during_a_glide_reveal_the_same_row() {
     let settled = state.scroll_target;
     assert!(settled > 0.);
     state.ease_scroll(0.28, false);
-    assert!(state.scroll < state.scroll_target, "the list is still gliding");
+    assert!(
+        state.scroll < state.scroll_target,
+        "the list is still gliding"
+    );
     state.focus(Target::App(last), &controls(&state));
     assert!(
         (state.scroll_target - settled).abs() < 0.01,
