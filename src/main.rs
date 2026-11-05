@@ -1774,6 +1774,12 @@ fn run() -> Result<(), String> {
         };
         let pressed_app = focused_app.clone().map(Target::App);
         let holding = state.pressed.as_ref() == pressed_app.as_ref();
+        // `State::animating` only reports the fades the state owns. The lift, the squeeze and
+        // the launch zoom are eased here instead, so the loop has to keep painting them itself:
+        // otherwise the idle backoff at the bottom of the loop wakes every 100 ms to 1 s and a
+        // 150 ms ramp renders as three coarse steps, which reads as lag while a card grows or
+        // shrinks.
+        let mut tile_motion = false;
         if state.preferences.reduced_motion {
             state.app_lift.clear();
             if let Some(id) = &focused_app {
@@ -1781,7 +1787,6 @@ fn run() -> Result<(), String> {
             }
             state.press_depth = if holding { 1. } else { 0. };
         } else {
-            let mut animating = false;
             if let Some(id) = &focused_app {
                 // The focused card needs an entry to ramp from: without it the map stays empty
                 // on a TV, and nothing below would ever lift, bloom or squeeze.
@@ -1795,7 +1800,7 @@ fn run() -> Result<(), String> {
                 };
                 *value += (target - *value) * smooth;
                 if (target - *value).abs() > 0.003 {
-                    animating = true;
+                    tile_motion = true;
                 }
             }
             state.app_lift.retain(|id, value| {
@@ -1807,7 +1812,7 @@ fn run() -> Result<(), String> {
                 let target = if holding { 1. } else { 0. };
                 state.press_depth += (target - state.press_depth) * smooth;
                 if (target - state.press_depth).abs() > 0.003 {
-                    animating = true;
+                    tile_motion = true;
                 } else {
                     state.press_depth = target;
                 }
@@ -1837,9 +1842,9 @@ fn run() -> Result<(), String> {
                 if over {
                     state.launch_zoom = None;
                 }
-                state.dirty = true;
+                tile_motion = true;
             }
-            if animating {
+            if tile_motion {
                 state.dirty = true;
             }
         }
@@ -2001,7 +2006,9 @@ fn run() -> Result<(), String> {
         prewarm_now = false;
         // Block until input instead of polling at frame rate on idle screens.
         // VSync paces animation; holds, scripted checks and icons still being
-        // decoded need short timed wakes.
+        // decoded need short timed wakes. The tile easing above is not part of
+        // `State::animating`, so it is folded in here.
+        let animating = tile_motion || state.animating();
         let timeout = if !visible {
             idle_waits = 0;
             250
@@ -2009,7 +2016,7 @@ fn run() -> Result<(), String> {
             // Profiling measures presentations, so it keeps polling and lets the swap pace it.
             idle_waits = 0;
             0
-        } else if pill != target || pill_width != target_width || state.animating() {
+        } else if pill != target || pill_width != target_width || animating {
             // Animation in progress. When the swap blocks on the display this polls for free;
             // when SDL refused the swap interval it waits out a frame instead of spinning the
             // CPU at full rate.
