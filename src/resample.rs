@@ -45,7 +45,9 @@ fn taps(index: u32, source_len: u32, target_len: u32) -> Vec<Tap> {
     let half = (WINDOW * step).ceil() as i64;
     let first = centre.floor() as i64 - half;
     let last = centre.floor() as i64 + half;
-    let mut taps = Vec::new();
+    // Keep the raw float weights while the lobe is summed, then round each to 16.16 once its
+    // normalised share of `total` is known.
+    let mut weighted = Vec::new();
     let mut total = 0.;
     for offset in first..=last {
         let weight = kernel((offset as f32 + 0.5 - centre) / step);
@@ -53,10 +55,10 @@ fn taps(index: u32, source_len: u32, target_len: u32) -> Vec<Tap> {
             continue;
         }
         total += weight;
-        taps.push(Tap {
-            index: offset.clamp(0, i64::from(source_len) - 1) as usize,
+        weighted.push((
+            offset.clamp(0, i64::from(source_len) - 1) as usize,
             weight,
-        });
+        ));
     }
     if total == 0. {
         // A source with a single sample, or a window that fell entirely between two.
@@ -65,9 +67,13 @@ fn taps(index: u32, source_len: u32, target_len: u32) -> Vec<Tap> {
             weight: SCALE as i32,
         }];
     }
-    for tap in taps.iter_mut() {
-        tap.weight = (tap.weight / total * SCALE).round() as i32;
-    }
+    let mut taps: Vec<Tap> = weighted
+        .into_iter()
+        .map(|(index, weight)| Tap {
+            index,
+            weight: (weight / total * SCALE).round() as i32,
+        })
+        .collect();
     // Rounding each weight separately can leave the taps summing to a few units short of a whole
     // pixel, which would shift a flat area down by one level: a visible banding step on a plate.
     // The difference goes to the strongest tap, so a flat colour maps back to itself exactly.
