@@ -33,7 +33,10 @@ void main() {
         return;
     }
     float blur = max(-v_params.y, 0.0);
-    vec2 half_size = v_shape.zw - vec2(blur);
+    // A glow (Draw::Glow) marks its half sizes negative: it uses a continuous exponential
+    // falloff instead of the shadow's symmetric smoothstep.
+    bool glow = v_shape.z < 0.0;
+    vec2 half_size = abs(v_shape.zw) - vec2(blur);
     float radius = min(v_params.x, min(half_size.x, half_size.y));
     vec2 q = abs(v_shape.xy) - half_size + vec2(radius);
     float d = length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - radius;
@@ -41,7 +44,19 @@ void main() {
     // pixel boundary stays one crisp step, and a one-pixel border is fully opaque.
     float alpha = clamp(0.5 - d / u_aa, 0.0, 1.0);
     if (blur > 0.0) {
-        alpha = 1.0 - smoothstep(-blur, blur, d);
+        if (glow) {
+            // Full strength inside the card and out to `hold`, then a smooth exponential
+            // decay. The stacked flat-alpha rings this replaced stepped hard every few pixels
+            // and banded; this curve passes through the same alpha at each old ring edge.
+            // Subtracting the residual at the quad's edge keeps the halo at exactly zero
+            // where the geometry ends, so the cutoff cannot show as a faint ring.
+            float hold = blur * 0.1;
+            float decay = max(blur * 0.2667, 0.001);
+            float edge = exp(-max(blur - hold, 0.0) / decay);
+            alpha = (exp(-max(d - hold, 0.0) / decay) - edge) / (1.0 - edge);
+        } else {
+            alpha = 1.0 - smoothstep(-blur, blur, d);
+        }
     }
     if (v_params.y > 0.0) {
         alpha *= clamp(0.5 + (d + v_params.y) / u_aa, 0.0, 1.0);

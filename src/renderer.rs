@@ -64,6 +64,9 @@ pub enum Draw {
     Shape(Rect, f32, f32, Color),
     RoundedGradient(Rect, f32, Color, Color),
     Shadow(Rect, f32, f32, Color),
+    /// Focus bloom: a continuous exponential halo around `rect`, fading over `blur` pixels.
+    /// Replaces the stacked flat-alpha rings that banded on dark wallpapers.
+    Glow(Rect, f32, f32, Color),
     Text(String, Rect, TextStyle, Color, bool),
     Image(String, Rect, f32, bool),
     TintedImage(String, Rect, f32, bool, Color),
@@ -195,6 +198,8 @@ impl RenderStats {
 enum PaintMode {
     Normal,
     Monochrome,
+    /// Focus bloom: the shader draws a continuous exponential halo (see `Draw::Glow`).
+    Glow,
 }
 
 enum BatchKind {
@@ -316,6 +321,7 @@ fn profile_skip(command: &Draw) -> bool {
         Draw::Shape(..) => "shape",
         Draw::RoundedGradient(..) => "gradient",
         Draw::Shadow(..) => "shadow",
+        Draw::Glow(..) => "glow",
         Draw::Text(..) => "text",
         Draw::Clip(_) | Draw::EdgeFade(_) | Draw::EdgeFadeX(_) => return false,
     };
@@ -657,6 +663,8 @@ impl Renderer {
         }
         let rect = self.snap(rect);
         let start = self.vertices.len() / 14;
+        // A glow's half sizes are negative: paint.frag uses that as the halo flag.
+        let half = if matches!(mode, PaintMode::Glow) { -0.5 } else { 0.5 };
         for (x, y) in [(0., 0.), (1., 0.), (0., 1.), (0., 1.), (1., 0.), (1., 1.)] {
             let color = colors[y as usize];
             self.vertices.extend_from_slice(&[
@@ -670,8 +678,8 @@ impl Renderer {
                 color[3],
                 (x - 0.5) * rect.w,
                 (y - 0.5) * rect.h,
-                rect.w / 2.,
-                rect.h / 2.,
+                half * rect.w,
+                half * rect.h,
                 radius,
                 border,
             ]);
@@ -1451,6 +1459,18 @@ impl Renderer {
                     -*blur,
                     *color,
                     self.white.id,
+                ),
+                // A glow marks its half sizes negative so paint.frag can tell the halo branch
+                // apart from a plain shadow (see PaintMode::Glow).
+                Draw::Glow(rect, radius, blur, color) => self.paint_quad(
+                    rect.inset(-*blur),
+                    [0., 0., 1., 1.],
+                    *radius,
+                    -*blur,
+                    [*color, *color],
+                    self.white.id,
+                    None,
+                    PaintMode::Glow,
                 ),
                 Draw::Text(text, rect, size, color, centered) => {
                     self.text(text, *rect, *size, *color, *centered)

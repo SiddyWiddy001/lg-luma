@@ -253,20 +253,20 @@ impl Scene {
         self.border(rect.inset(-2.6), radius + 2.6, 5.2, c(0xeaf2ff, 0.22 * intensity));
         self.border(rect.inset(-1.2), radius + 1.2, 2.2, c(0xffffff, 0.55 * intensity));
     }
-    /// Focus bloom behind a card: filled rounded shapes that expand outward and fade, so
-    /// light bleeds from behind the glass. The tile is painted over them, leaving only the
-    /// halo outside its edges: a soft glow rather than a hard outline that teleports. The
-    /// focused card is drawn last by the page, so no neighbouring tile paints over this.
+    /// Focus bloom behind a card: light bleeds out from behind the glass, and the tile is
+    /// painted over it, leaving only the halo outside its edges. One continuous exponential
+    /// falloff instead of stacked flat-alpha rings: five rings stepped hard at 6/12/20/30 px,
+    /// which read as concentric bands on a dark wallpaper. The halo is full strength inside the
+    /// rect, matching what the five rings composited to, so the translucent plate is lit exactly
+    /// as before. The focused card is drawn last by the page, so no neighbour paints over it.
     fn glow(&mut self, rect: Rect, radius: f32, intensity: f32) {
-        for (grow, alpha) in [
-            (6., 0.24),
-            (12., 0.165),
-            (20., 0.105),
-            (30., 0.06),
-            (42., 0.038),
-        ] {
-            self.shape(rect.inset(-grow), radius + grow, c(0xe8eef8, alpha * intensity));
-        }
+        // Keep the falloff inside the card on small surfaces: half_size - blur must stay
+        // positive in the shader's rounded-rect distance field.
+        let blur = 60.0f32.min(rect.w * 0.45).min(rect.h * 0.45);
+        // 0.49 at the edge matches what the five rings composited to, and the shader's
+        // hold-then-decay curve passes through their alpha at 6/12/20/30/42 px.
+        self.draw
+            .push(Draw::Glow(rect, radius, blur, c(0xe8eef8, 0.49 * intensity)));
     }
     fn shadow(&mut self, rect: Rect, radius: f32, blur: f32, y: f32, alpha: f32) {
         self.draw.push(Draw::Shadow(
@@ -317,6 +317,7 @@ impl Scene {
             match draw {
                 Draw::Shape(_, _, _, color)
                 | Draw::Shadow(_, _, _, color)
+                | Draw::Glow(_, _, _, color)
                 | Draw::Text(_, _, _, color, _)
                 | Draw::TintedImage(_, _, _, _, color)
                 | Draw::AppImage(_, _, _, color)
