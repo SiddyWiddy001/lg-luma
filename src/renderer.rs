@@ -1619,15 +1619,21 @@ impl Renderer {
                     let fade = batch.fade.unwrap_or([0.; 8]);
                     for program in [self.program, self.vector_program, self.text_program] {
                         gl::UseProgram(program);
-                        let uniforms = if program == self.vector_program {
-                            &self.uniforms.vector
+                        let (edge_fade, edge_fade_x) = if program == self.vector_program {
+                            (
+                                self.uniforms.vector.edge_fade,
+                                self.uniforms.vector.edge_fade_x,
+                            )
                         } else if program == self.text_program {
-                            &self.uniforms.text
+                            (self.uniforms.text.edge_fade, self.uniforms.text.edge_fade_x)
                         } else {
-                            &self.uniforms.paint
+                            (
+                                self.uniforms.paint.edge_fade,
+                                self.uniforms.paint.edge_fade_x,
+                            )
                         };
-                        gl::Uniform4f(uniforms.edge_fade, fade[0], fade[1], fade[2], fade[3]);
-                        gl::Uniform4f(uniforms.edge_fade_x, fade[4], fade[5], fade[6], fade[7]);
+                        gl::Uniform4f(edge_fade, fade[0], fade[1], fade[2], fade[3]);
+                        gl::Uniform4f(edge_fade_x, fade[4], fade[5], fade[6], fade[7]);
                     }
                     current_fade = Some(batch.fade);
                     paint_bound = false;
