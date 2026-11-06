@@ -2655,11 +2655,15 @@ fn settings_content(out: &mut Scene, state: &State, assets: &Assets) {
                 + 111.6)
                 .ceil()
                 .min(360.);
+            // The cinematic toggle sits at the content edge on its own, apart from the three
+            // right-aligned actions. Four pills in one row overflowed the 640..1760 content
+            // width in long translations, so the chain keeps its upstream budget and this
+            // pill is capped to stay clear of the empty strip above the gallery.
             let cinematic_width = (assets.width(cinematic_label, text(20.8, 550, -0.02))
                 + rotation_value_width(assets, language)
                 + 111.6)
                 .ceil()
-                .min(430.);
+                .min(340.);
             let cycle_width = (assets.width(cycle_label, text(20.8, 550, -0.02))
                 + rotation_value_width(assets, language)
                 + 111.6)
@@ -2695,7 +2699,7 @@ fn settings_content(out: &mut Scene, state: &State, assets: &Assets) {
                 Row {
                     target: Target::WallpaperGradient,
                     rect: Rect::new(
-                        1760. - cycle_width - 40. - cinematic_width - gradient_width,
+                        1760. - cycle_width - 20. - gradient_width,
                         164.8,
                         gradient_width,
                         64.,
@@ -2722,12 +2726,7 @@ fn settings_content(out: &mut Scene, state: &State, assets: &Assets) {
                 assets,
                 Row {
                     target: Target::WallpaperCinematic,
-                    rect: Rect::new(
-                        1760. - cycle_width - 20. - cinematic_width,
-                        164.8,
-                        cinematic_width,
-                        64.,
-                    ),
+                    rect: Rect::new(640., 164.8, cinematic_width, 64.),
                     title: cinematic_label,
                     icon: Some("sparkles"),
                     value: Some(language.t(if state.preferences.cinematic_wallpaper {
@@ -2747,7 +2746,7 @@ fn settings_content(out: &mut Scene, state: &State, assets: &Assets) {
                 Row {
                     target: Target::UploadWallpaper,
                     rect: Rect::new(
-                        1760. - cycle_width - 60. - cinematic_width - gradient_width - upload_width,
+                        1760. - cycle_width - 40. - gradient_width - upload_width,
                         164.8,
                         upload_width,
                         64.,
