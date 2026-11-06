@@ -333,6 +333,15 @@ impl<'a, S: System> Home<'a, S> {
         Ok(())
     }
     pub fn apply(&self, config: &Config, open: bool) -> Result<()> {
+        self.apply_with(config, open, false)
+    }
+    /// Cold boot: mount and start Home immediately instead of waiting for the preload
+    /// manager's scheduled launch. A launch that does not reach the foreground must keep
+    /// the mount, because that later launch is the fallback.
+    pub fn boot(&self, config: &Config) -> Result<()> {
+        self.apply_with(config, true, true)
+    }
+    fn apply_with(&self, config: &Config, open: bool, keep_mount_on_failure: bool) -> Result<()> {
         if !self.exists(Path::new(&config.app_dir).join("luma")) {
             return Err("Luma is no longer installed".into());
         }
@@ -392,6 +401,9 @@ impl<'a, S: System> Home<'a, S> {
             Ok(())
         })();
         if let Err(error) = result {
+            if keep_mount_on_failure {
+                return Err(error);
+            }
             return match self.restore(config) {
                 Ok(()) => Err(error),
                 Err(recovery) => Err(format!("{error}\nRestore also failed: {recovery}")),
@@ -612,11 +624,15 @@ pub fn dispatch(
             home.install(Path::new(app.ok_or("Missing installation directory")?))?;
             Ok(json!({"returnValue":true}))
         }
-        "apply" | "disable" | "restore" => {
+        "apply" | "boot" | "disable" | "restore" => {
             let mut config = saved.ok_or("Luma Home has not been enabled")?;
-            if command == "apply" && config.enabled {
-                home.apply(&config, false)?;
-            } else {
+            if (command == "apply" || command == "boot") && config.enabled {
+                if command == "boot" {
+                    home.boot(&config)?;
+                } else {
+                    home.apply(&config, false)?;
+                }
+            } else if command != "boot" {
                 config.enabled = false;
                 system::write_json(system, CONFIG, &config)?;
                 home.restore(&config)?;

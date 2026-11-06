@@ -14,7 +14,7 @@ case "$COMMAND" in
   *) printf '%s\n' 'Usage: home.sh enable [APP_DIR] [HOME_ID] | disable | restore | status' >&2; exit 1 ;;
 esac
 [ "$(id -u)" = 0 ] || { printf '%s\n' 'Run as root.' >&2; exit 1; }
-# boot only schedules the copied $STATE/home.sh apply, which checks for the helper itself.
+# boot stays quiet when the copied helper is missing, so a removed package cannot break startup.
 [ "$COMMAND" = boot ] || [ -x "$SCRIPT_DIR/luma-helper" ] ||
   { printf '%s\n' 'The native Luma TV helper is missing.' >&2; exit 1; }
 if [ "$COMMAND" = enable ] && grep -q 'release [56]\.' /etc/starfish-release 2>/dev/null; then
@@ -67,8 +67,10 @@ if [ ! -d "$STATE" ]; then mkdir -m 755 "$STATE" || exit 1; fi
 [ "$(stat -c %u "$STATE")" = 0 ] || exit 1
 if [ "$COMMAND" = boot ]; then
   (
-    sleep 5
-    exec sh "$STATE/home.sh" apply
+    printf 'boot up=%s\n' "$(cut -d. -f1 /proc/uptime)"
+    # Mount and launch Home now instead of waiting for the preload manager's later
+    # launch; that launch stays the fallback if this one is refused.
+    [ -x "$SCRIPT_DIR/luma-helper" ] && exec "$SCRIPT_DIR/luma-helper" home boot "$SCRIPT_DIR"
   ) </dev/null >>"$STATE/boot.log" 2>&1 &
   exit 0
 fi

@@ -361,6 +361,28 @@ fn boot_apply_does_not_take_another_apps_screen() {
     assert!(!f.calls().iter().any(|s| s.contains("/launch ")));
 }
 #[test]
+fn boot_launches_home_before_the_preload_manager_can() {
+    let f = Fixture::new();
+    let h = home::Home::new(&f, home::HOME).unwrap();
+    h.boot(&f.config("executable", home::HOME)).unwrap();
+    assert_eq!(f.front.borrow().as_str(), home::HOME);
+    assert!(f.calls().iter().any(|s| s.contains("/launch ")));
+}
+#[test]
+fn boot_keeps_the_mount_when_home_does_not_come_to_the_front() {
+    let f = Fixture::new();
+    f.launch_front.set(false);
+    let h = home::Home::new(&f, home::HOME).unwrap();
+    assert!(
+        h.boot(&f.config("executable", home::HOME))
+            .unwrap_err()
+            .contains("did not come")
+    );
+    // The preload manager's own launch still has to find Luma mounted.
+    assert!(system::same_file(&f, EXE, format!("{DIR}/luma")));
+    assert!(system::exists(&f, "/var/run/luma-home"));
+}
+#[test]
 fn package_update_replaces_the_old_bound_inode() {
     let f = Fixture::new();
     let h = home::Home::new(&f, home::HOME).unwrap();
