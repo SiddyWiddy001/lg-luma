@@ -364,11 +364,31 @@ fn youtube_recents_uses_the_apps_vector_and_the_same_relative_logo_geometry() {
             })
             .unwrap()
     };
+    // The glass plate replaced the old surface bitmap, so the card's face is the last
+    // rounded gradient painted before its logo (the reflection layer shares the face rect).
+    let face = |scene: &view::Scene, logo: &str| {
+        let index = scene
+            .draw
+            .iter()
+            .position(|draw| match draw {
+                Draw::Image(path, ..) | Draw::TintedImage(path, ..) => path.ends_with(logo),
+                _ => false,
+            })
+            .unwrap();
+        scene.draw[..index]
+            .iter()
+            .rev()
+            .find_map(|draw| match draw {
+                Draw::RoundedGradient(rect, ..) => Some(*rect),
+                _ => None,
+            })
+            .unwrap()
+    };
     let mut state = ready();
     state.preferences.reduced_motion = true;
     state.open(1);
     let apps = scene(&state);
-    let app_face = bounds(&apps, "surfaces/youtube.png");
+    let app_face = face(&apps, "logos/youtube.lvec");
     let app_logo = bounds(&apps, "logos/youtube.lvec");
     state.open_recents();
     accept(&mut state, recents::normalize(&json!({"recentsAppList":[{
@@ -376,7 +396,7 @@ fn youtube_recents_uses_the_apps_vector_and_the_same_relative_logo_geometry() {
         "customImageFilePath":"/media/developer/apps/usr/palm/applications/youtube.leanback.v4/imageForRecents.png"
     }]})).unwrap());
     let recent = scene(&state);
-    let recent_face = bounds(&recent, "surfaces/youtube.png");
+    let recent_face = face(&recent, "logos/youtube.lvec");
     let recent_logo = bounds(&recent, "logos/youtube.lvec");
     assert!((app_logo.w / app_face.w - recent_logo.w / recent_face.w).abs() < 0.0001);
     assert!((app_logo.h / app_face.h - recent_logo.h / recent_face.h).abs() < 0.0001);
