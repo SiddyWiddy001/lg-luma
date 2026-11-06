@@ -1362,7 +1362,9 @@ impl State {
                 match direction {
                     Direction::Right => {
                         let entry = if self.section == 1 {
-                            Target::UploadWallpaper
+                            // The cinematic toggle is the leftmost pill, so it is the first
+                            // control a Right from the sidebar reaches.
+                            Target::WallpaperCinematic
                         } else {
                             self.section_entry()
                         };
@@ -1562,6 +1564,10 @@ impl State {
                                 Target::WallpaperCycle
                             } else if index == 1 {
                                 Target::WallpaperGradient
+                            } else if index == 0 {
+                                // The cinematic pill sits at the content edge, directly above
+                                // the first gallery card.
+                                Target::WallpaperCinematic
                             } else if index < 3 {
                                 Target::UploadWallpaper
                             } else {
@@ -1587,14 +1593,14 @@ impl State {
                 match direction {
                     Direction::Down => self.focus(Target::Background(0), controls),
                     Direction::Up => self.focus(Target::Nav(2), controls),
-                    Direction::Left => self.focus(Target::Sidebar(1), controls),
+                    Direction::Left => self.focus(Target::WallpaperCinematic, controls),
                     Direction::Right => self.focus(Target::WallpaperGradient, controls),
                 }
                 return vec![];
             }
             if self.focus == Target::WallpaperGradient {
                 match direction {
-                    Direction::Right => self.focus(Target::WallpaperCinematic, controls),
+                    Direction::Right => self.focus(Target::WallpaperCycle, controls),
                     Direction::Left => self.focus(Target::UploadWallpaper, controls),
                     Direction::Up => self.focus(Target::Nav(2), controls),
                     Direction::Down => self.focus(
@@ -1606,20 +1612,17 @@ impl State {
             }
             if self.focus == Target::WallpaperCinematic {
                 match direction {
-                    Direction::Right => self.focus(Target::WallpaperCycle, controls),
-                    Direction::Left => self.focus(Target::WallpaperGradient, controls),
+                    Direction::Right => self.focus(Target::UploadWallpaper, controls),
+                    Direction::Left => self.focus(Target::Sidebar(1), controls),
                     Direction::Up => self.focus(Target::Nav(2), controls),
-                    Direction::Down => self.focus(
-                        Target::Background(1.min(self.background_count().saturating_sub(1))),
-                        controls,
-                    ),
+                    Direction::Down => self.focus(Target::Background(0), controls),
                 }
                 return vec![];
             }
             if self.focus == Target::WallpaperCycle {
                 match direction {
                     Direction::Right => {}
-                    Direction::Left => self.focus(Target::WallpaperCinematic, controls),
+                    Direction::Left => self.focus(Target::WallpaperGradient, controls),
                     Direction::Up => self.focus(Target::Nav(2), controls),
                     Direction::Down => self.focus(
                         Target::Background(2.min(self.background_count().saturating_sub(1))),

@@ -293,6 +293,8 @@ fn upload_is_modal_and_close_restores_its_exact_parent() {
     state.section = 1;
     state.focus = Target::Background(0);
     state.direction(Direction::Up, &controls(&state));
+    assert_eq!(state.focus, Target::WallpaperCinematic);
+    state.direction(Direction::Right, &controls(&state));
     assert_eq!(state.focus, Target::UploadWallpaper);
     assert!(state.activate().is_empty());
     assert!(matches!(state.overlay, Some(Overlay::WallpaperUpload)));
