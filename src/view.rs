@@ -1872,17 +1872,13 @@ fn library_grid(out: &mut Scene, state: &State, assets: &Assets) {
             favorites.contains(&app.id),
         );
     };
-    let grid_bottom = {
-        let viewport = state.content_viewport();
-        viewport.y + viewport.h
-    };
     let mut focused: Option<(&App, Rect, Option<f32>)> = None;
     for row in apps.chunks(APPS_COLUMNS) {
-        // Rows only ever start further down, so once a row begins past the viewport there is
-        // nothing left to measure or draw.
-        if y - s > grid_bottom {
-            break;
-        }
+        // Every row emits a control, not just the visible ones: `tile()` discards the drawing
+        // of an off-screen card, but reveal_focus and grid navigation need the card's place in
+        // the list to scroll toward it. Rows below the viewport are therefore still measured,
+        // as their captions set the row pitch that puts later rows at the right height; the
+        // wrap pass here only reads the advance tables, so it costs well under a millisecond.
         // Measure each caption once for the row instead of again for every tile that wraps it.
         let captions: Vec<f32> = if names {
             row.iter()
