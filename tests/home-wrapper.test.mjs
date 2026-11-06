@@ -44,7 +44,7 @@ async function fixture({ helper = true, relative = false } = {}) {
       timeout: 10000,
     });
   const recorded = async () => {
-    // Long enough for a real 5 s sleep where the shell runs sleep as a builtin (busybox ash).
+    // Poll briefly for the backgrounded boot subshell to reach the recording helper.
     for (let i = 0; i < 200; i++) {
       const text = await fs.readFile(calls, 'utf8').catch(() => '');
       if (text) return text.trim().split('\n');
@@ -68,12 +68,12 @@ for (const relative of [false, true]) {
   });
 }
 
-test('a cold boot through the hook symlink schedules the copied apply', async () => {
+test('a cold boot through the hook symlink hands straight to the copied helper', async () => {
   const tv = await fixture();
   try {
     const boot = tv.run();
     assert.equal(boot.status, 0, boot.stderr);
-    assert.deepEqual(await tv.recorded(), [`[home][apply][${tv.state}][]`]);
+    assert.deepEqual(await tv.recorded(), [`[home][boot][${tv.state}]`]);
   } finally {
     await fs.rm(tv.root, { recursive: true, force: true });
   }
