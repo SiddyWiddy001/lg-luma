@@ -235,6 +235,34 @@ struct Batch {
     fade: Option<[f32; 8]>,
 }
 
+/// Uniform locations are stable for a program, so they are looked up once instead of
+/// once per batch (the Apps captions alone submit dozens of text batches per frame).
+struct PaintUniforms {
+    aa: GLint,
+    texture: GLint,
+    edge_fade: GLint,
+    edge_fade_x: GLint,
+    app: GLint,
+    icon_tint: GLint,
+    app_top: GLint,
+    app_bottom: GLint,
+}
+struct MeshUniforms {
+    edge_fade: GLint,
+    edge_fade_x: GLint,
+    fringe: GLint,
+    embolden: GLint,
+    transform: GLint,
+    pixel_scale: GLint,
+    tint: GLint,
+    mono: GLint,
+}
+struct Uniforms {
+    paint: PaintUniforms,
+    vector: MeshUniforms,
+    text: MeshUniforms,
+}
+
 fn full_screen(rect: &Rect) -> bool {
     rect.x <= 0. && rect.y <= 0. && rect.x + rect.w >= 1920. && rect.y + rect.h >= 1080.
 }
@@ -353,6 +381,10 @@ fn snap_rect(rect: Rect, scale: f32) -> Rect {
     Rect::new(x0, y0, x1 - x0, y1 - y0)
 }
 
+fn uniform(program: GLuint, name: &CStr) -> GLint {
+    unsafe { gl::GetUniformLocation(program, name.as_ptr()) }
+}
+
 pub struct Renderer {
     program: GLuint,
     vector_program: GLuint,
@@ -374,6 +406,7 @@ pub struct Renderer {
     clip: Option<Rect>,
     // [top fade-in, top end, bottom start, bottom fade-out, left ×2, right ×2]; 0 = off.
     fade: Option<[f32; 8]>,
+    uniforms: Uniforms,
     frame: u64,
     stats: RenderStats,
     pub info: GraphicsInfo,
@@ -453,6 +486,38 @@ impl Renderer {
                 return Err(error);
             }
         };
+        let uniforms = Uniforms {
+            paint: PaintUniforms {
+                aa: uniform(program, c"u_aa"),
+                texture: uniform(program, c"u_texture"),
+                edge_fade: uniform(program, c"u_edge_fade"),
+                edge_fade_x: uniform(program, c"u_edge_fade_x"),
+                app: uniform(program, c"u_app"),
+                icon_tint: uniform(program, c"u_icon_tint"),
+                app_top: uniform(program, c"u_app_top"),
+                app_bottom: uniform(program, c"u_app_bottom"),
+            },
+            vector: MeshUniforms {
+                edge_fade: uniform(vector_program, c"u_edge_fade"),
+                edge_fade_x: uniform(vector_program, c"u_edge_fade_x"),
+                fringe: uniform(vector_program, c"u_fringe"),
+                embolden: uniform(vector_program, c"u_embolden"),
+                transform: uniform(vector_program, c"u_transform"),
+                pixel_scale: uniform(vector_program, c"u_pixel_scale"),
+                tint: uniform(vector_program, c"u_tint"),
+                mono: uniform(vector_program, c"u_mono"),
+            },
+            text: MeshUniforms {
+                edge_fade: uniform(text_program, c"u_edge_fade"),
+                edge_fade_x: uniform(text_program, c"u_edge_fade_x"),
+                fringe: uniform(text_program, c"u_fringe"),
+                embolden: uniform(text_program, c"u_embolden"),
+                transform: uniform(text_program, c"u_transform"),
+                pixel_scale: uniform(text_program, c"u_pixel_scale"),
+                tint: uniform(text_program, c"u_tint"),
+                mono: uniform(text_program, c"u_mono"),
+            },
+        };
         let mut buffer = 0;
         let mut vao = 0;
         unsafe {
@@ -494,6 +559,7 @@ impl Renderer {
             batches: Vec::new(),
             clip: None,
             fade: None,
+            uniforms,
             frame: 0,
             stats: RenderStats::new(Size::HD),
             info: GraphicsInfo {
@@ -1541,14 +1607,8 @@ impl Renderer {
             );
             gl::UseProgram(self.program);
             // One drawable pixel in logical units: the paint shader's edge filter width.
-            gl::Uniform1f(
-                gl::GetUniformLocation(self.program, c"u_aa".as_ptr()),
-                1. / scale.max(0.01),
-            );
-            gl::Uniform1i(
-                gl::GetUniformLocation(self.program, c"u_texture".as_ptr()),
-                0,
-            );
+            gl::Uniform1f(self.uniforms.paint.aa, 1. / scale.max(0.01));
+            gl::Uniform1i(self.uniforms.paint.texture, 0);
             gl::ActiveTexture(gl::TEXTURE0);
             let mut paint_bound = false;
             let mut current_fade = None;
@@ -1559,20 +1619,15 @@ impl Renderer {
                     let fade = batch.fade.unwrap_or([0.; 8]);
                     for program in [self.program, self.vector_program, self.text_program] {
                         gl::UseProgram(program);
-                        gl::Uniform4f(
-                            gl::GetUniformLocation(program, c"u_edge_fade".as_ptr()),
-                            fade[0],
-                            fade[1],
-                            fade[2],
-                            fade[3],
-                        );
-                        gl::Uniform4f(
-                            gl::GetUniformLocation(program, c"u_edge_fade_x".as_ptr()),
-                            fade[4],
-                            fade[5],
-                            fade[6],
-                            fade[7],
-                        );
+                        let uniforms = if program == self.vector_program {
+                            &self.uniforms.vector
+                        } else if program == self.text_program {
+                            &self.uniforms.text
+                        } else {
+                            &self.uniforms.paint
+                        };
+                        gl::Uniform4f(uniforms.edge_fade, fade[0], fade[1], fade[2], fade[3]);
+                        gl::Uniform4f(uniforms.edge_fade_x, fade[4], fade[5], fade[6], fade[7]);
                     }
                     current_fade = Some(batch.fade);
                     paint_bound = false;
@@ -1616,12 +1671,9 @@ impl Renderer {
                             paint_bound = true;
                         }
                         gl::BindTexture(gl::TEXTURE_2D, *texture);
-                        gl::Uniform1i(
-                            gl::GetUniformLocation(self.program, c"u_app".as_ptr()),
-                            i32::from(backdrop.is_some()),
-                        );
+                        gl::Uniform1i(self.uniforms.paint.app, i32::from(backdrop.is_some()));
                         gl::Uniform1f(
-                            gl::GetUniformLocation(self.program, c"u_icon_tint".as_ptr()),
+                            self.uniforms.paint.icon_tint,
                             if matches!(mode, PaintMode::Monochrome) {
                                 1.
                             } else {
@@ -1629,11 +1681,12 @@ impl Renderer {
                             },
                         );
                         if let Some(stops) = backdrop {
-                            for (name, rgb) in
-                                [(c"u_app_top", stops[0]), (c"u_app_bottom", stops[1])]
-                            {
+                            for (location, rgb) in [
+                                (self.uniforms.paint.app_top, stops[0]),
+                                (self.uniforms.paint.app_bottom, stops[1]),
+                            ] {
                                 gl::Uniform3f(
-                                    gl::GetUniformLocation(self.program, name.as_ptr()),
+                                    location,
                                     rgb[0] as f32 / 255.,
                                     rgb[1] as f32 / 255.,
                                     rgb[2] as f32 / 255.,
@@ -1726,21 +1779,23 @@ impl Renderer {
         mono: f32,
     ) {
         let viewport = self.stats.viewport;
+        let uniforms = if program == self.text_program {
+            &self.uniforms.text
+        } else {
+            &self.uniforms.vector
+        };
         unsafe {
             gl::UseProgram(program);
             if program == self.text_program {
                 gl::Uniform1f(
-                    gl::GetUniformLocation(program, c"u_fringe".as_ptr()),
+                    uniforms.fringe,
                     if self.stats.multisample_samples > 1 {
                         0.
                     } else {
                         0.5
                     },
                 );
-                gl::Uniform1f(
-                    gl::GetUniformLocation(program, c"u_embolden".as_ptr()),
-                    embolden,
-                );
+                gl::Uniform1f(uniforms.embolden, embolden);
             }
             gl::BindBuffer(gl::ARRAY_BUFFER, mesh.buffer);
             gl::DisableVertexAttribArray(4);
@@ -1758,25 +1813,19 @@ impl Renderer {
                 offset += size as usize;
             }
             gl::Uniform4f(
-                gl::GetUniformLocation(program, c"u_transform".as_ptr()),
+                uniforms.transform,
                 transform[0],
                 transform[1],
                 transform[2],
                 transform[3],
             );
             gl::Uniform2f(
-                gl::GetUniformLocation(program, c"u_pixel_scale".as_ptr()),
+                uniforms.pixel_scale,
                 viewport.width as f32 / 1920.,
                 viewport.height as f32 / 1080.,
             );
-            gl::Uniform4f(
-                gl::GetUniformLocation(program, c"u_tint".as_ptr()),
-                tint[0],
-                tint[1],
-                tint[2],
-                tint[3],
-            );
-            gl::Uniform1f(gl::GetUniformLocation(program, c"u_mono".as_ptr()), mono);
+            gl::Uniform4f(uniforms.tint, tint[0], tint[1], tint[2], tint[3]);
+            gl::Uniform1f(uniforms.mono, mono);
             gl::DrawArrays(gl::TRIANGLES, 0, mesh.vertices);
         }
     }
