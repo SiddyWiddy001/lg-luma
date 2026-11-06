@@ -1365,8 +1365,14 @@ fn opening_side_popup_preserves_card_artwork_geometry_with_or_without_captions()
                     .iter()
                     .filter_map(|draw| match draw {
                         crate::renderer::Draw::Image(path, rect, ..)
-                        | crate::renderer::Draw::TintedImage(path, rect, ..)
                             if path.contains("heart-filled") && rect.x < 350. =>
+                        {
+                            Some([rect.x, rect.y, rect.w, rect.h])
+                        }
+                        // The badge's dark offset shadow is a second heart draw; only the
+                        // opaque foreground heart counts as the card's favourite marker.
+                        crate::renderer::Draw::TintedImage(path, rect, _, _, color)
+                            if path.contains("heart-filled") && rect.x < 350. && color[3] == 1. =>
                         {
                             Some([rect.x, rect.y, rect.w, rect.h])
                         }
