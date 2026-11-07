@@ -287,6 +287,19 @@ fn full_screen(rect: &Rect) -> bool {
     rect.x <= 0. && rect.y <= 0. && rect.x + rect.w >= 1920. && rect.y + rect.h >= 1080.
 }
 
+/// A full-screen paint command, such as the modal/Recents dim layer, can cover
+/// text that was deferred earlier. Flush those deferred runs before it so the
+/// parent interface stays beneath the overlay.
+fn full_screen_paint(command: &Draw) -> bool {
+    match command {
+        Draw::Shape(rect, ..)
+        | Draw::RoundedGradient(rect, ..)
+        | Draw::Image(_, rect, ..)
+        | Draw::TintedImage(_, rect, ..) => full_screen(rect),
+        _ => false,
+    }
+}
+
 /// An opaque, untinted, square full-screen image: the wallpaper that scrims can fold into.
 fn plain_wallpaper(command: &Draw) -> Option<(&str, Rect)> {
     match command {
@@ -1313,7 +1326,7 @@ impl Renderer {
         let start = append_text_run(&mut self.text_vertices, run, origin, shadow, offset);
         let count = self.text_vertices.len() / 13 - start;
         let embolden = embolden(
-            f32::from_bits(key.layout[0]) * self.stats.viewport.height / 1080.,
+            f32::from_bits(key.layout[0]) * self.stats.viewport.height as f32 / 1080.,
             self.text_embolden,
         );
         self.pending_text.push(DeferredText {
@@ -1336,7 +1349,7 @@ impl Renderer {
         let start = append_text_run(&mut self.text_vertices, run, origin, tint, 0.);
         let count = self.text_vertices.len() / 13 - start;
         let embolden = embolden(
-            f32::from_bits(key.layout[0]) * self.stats.viewport.height / 1080.,
+            f32::from_bits(key.layout[0]) * self.stats.viewport.height as f32 / 1080.,
             self.text_embolden,
         );
         self.pending_text.push(DeferredText {
@@ -1714,6 +1727,9 @@ impl Renderer {
             index += 1;
             if profile_skip(command) {
                 continue;
+            }
+            if full_screen_paint(command) {
+                self.flush_deferred();
             }
             if let Some((path, wallpaper)) = plain_wallpaper(command)
                 && self.clip.is_none()
