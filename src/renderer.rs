@@ -162,6 +162,21 @@ pub struct RenderStats {
     pub high_resolution_wallpaper: bool,
     pub draw_calls: usize,
     pub cpu_submission_ms: f64,
+    /// Where `cpu_submission_ms` went: scene assembly, clear, buffer uploads, GL setup, the
+    /// draw loop split by batch kind, and the tail (cache trimming and stats).
+    pub build_ms: f64,
+    pub clear_ms: f64,
+    pub upload_ms: f64,
+    pub upload_bytes: usize,
+    pub setup_ms: f64,
+    pub draw_paint_ms: f64,
+    pub draw_vector_ms: f64,
+    pub draw_text_ms: f64,
+    pub draw_ms: f64,
+    pub tail_ms: f64,
+    pub paint_batches: usize,
+    pub vector_batches: usize,
+    pub text_batches: usize,
     /// Share of the drawable redrawn in the last frame (1 without partial redraw).
     pub redrawn_fraction: f64,
 }
@@ -193,6 +208,19 @@ impl RenderStats {
             high_resolution_wallpaper: false,
             draw_calls: 0,
             cpu_submission_ms: 0.,
+            build_ms: 0.,
+            clear_ms: 0.,
+            upload_ms: 0.,
+            upload_bytes: 0,
+            setup_ms: 0.,
+            draw_paint_ms: 0.,
+            draw_vector_ms: 0.,
+            draw_text_ms: 0.,
+            draw_ms: 0.,
+            tail_ms: 0.,
+            paint_batches: 0,
+            vector_batches: 0,
+            text_batches: 0,
             redrawn_fraction: 1.,
         }
     }
@@ -1820,6 +1848,7 @@ impl Renderer {
         let area = damage.map(|pixels| Self::damage_area(pixels, width, height));
         let started = Instant::now();
         self.build(commands, width, height, area);
+        let built = Instant::now();
         let Viewport {
             x: vx,
             y: vy,
@@ -1839,12 +1868,23 @@ impl Renderer {
                 None => gl::Disable(gl::SCISSOR_TEST),
             }
         };
+        let clear_ms;
+        let upload_ms;
+        let upload_bytes;
+        let setup_ms;
+        let draw_ms;
+        let mut draw_paint_ms = 0.;
+        let mut draw_vector_ms = 0.;
+        let mut draw_text_ms = 0.;
         unsafe {
             gl::Viewport(0, 0, width as i32, height as i32);
             scissor(damage);
+            let clear_started = Instant::now();
             gl::ClearColor(0.04, 0.04, 0.05, 1.);
             gl::Clear(gl::COLOR_BUFFER_BIT);
+            clear_ms = clear_started.elapsed().as_secs_f64() * 1000.;
             gl::Viewport(vx, vy, vw, vh);
+            let upload_started = Instant::now();
             if self.vao != 0 {
                 gl::BindVertexArray(self.vao);
             }
@@ -1882,11 +1922,20 @@ impl Renderer {
                     gl::DYNAMIC_DRAW,
                 );
             }
+            upload_ms = upload_started.elapsed().as_secs_f64() * 1000.;
+            upload_bytes = (self.vertices.len()
+                + self.text_vertices.len()
+                + self.vector_vertices.len()
+                + self.logo_vertices.len())
+                * size_of::<f32>();
+            let setup_started = Instant::now();
             gl::UseProgram(self.program);
             // One drawable pixel in logical units: the paint shader's edge filter width.
             gl::Uniform1f(self.uniforms.paint.aa, 1. / scale.max(0.01));
             gl::Uniform1i(self.uniforms.paint.texture, 0);
             gl::ActiveTexture(gl::TEXTURE0);
+            setup_ms = setup_started.elapsed().as_secs_f64() * 1000.;
+            let draw_started = Instant::now();
             let mut paint_bound = false;
             let mut current_fade = None;
             for batch in &self.batches {
@@ -1927,6 +1976,7 @@ impl Renderer {
                     (Some(a), Some(b)) => Some(intersect(a, b)),
                     (a, b) => a.or(b),
                 });
+                let batch_started = Instant::now();
                 match &batch.kind {
                     BatchKind::Paint {
                         texture,
@@ -1996,9 +2046,17 @@ impl Renderer {
                         paint_bound = false;
                     }
                 }
+                let batch_ms = batch_started.elapsed().as_secs_f64() * 1000.;
+                match &batch.kind {
+                    BatchKind::Paint { .. } => draw_paint_ms += batch_ms,
+                    BatchKind::Vector { .. } => draw_vector_ms += batch_ms,
+                    BatchKind::Text { .. } => draw_text_ms += batch_ms,
+                }
             }
+            draw_ms = draw_started.elapsed().as_secs_f64() * 1000.;
             gl::Disable(gl::SCISSOR_TEST);
         }
+        let tail_started = Instant::now();
         // Keep the current scene, evict old full-resolution wallpapers before memory grows.
         let mut bytes: usize = self
             .textures
@@ -2031,6 +2089,31 @@ impl Renderer {
         self.stats.vector_bytes = self.vectors.values().flatten().map(|mesh| mesh.bytes).sum();
         self.stats.artwork_bytes = bytes + self.stats.vector_bytes;
         self.stats.draw_calls = self.batches.len();
+        self.stats.paint_batches = self
+            .batches
+            .iter()
+            .filter(|batch| matches!(batch.kind, BatchKind::Paint { .. }))
+            .count();
+        self.stats.vector_batches = self
+            .batches
+            .iter()
+            .filter(|batch| matches!(batch.kind, BatchKind::Vector { .. }))
+            .count();
+        self.stats.text_batches = self
+            .batches
+            .iter()
+            .filter(|batch| matches!(batch.kind, BatchKind::Text { .. }))
+            .count();
+        self.stats.build_ms = built.duration_since(started).as_secs_f64() * 1000.;
+        self.stats.clear_ms = clear_ms;
+        self.stats.upload_ms = upload_ms;
+        self.stats.upload_bytes = upload_bytes;
+        self.stats.setup_ms = setup_ms;
+        self.stats.draw_paint_ms = draw_paint_ms;
+        self.stats.draw_vector_ms = draw_vector_ms;
+        self.stats.draw_text_ms = draw_text_ms;
+        self.stats.draw_ms = draw_ms;
+        self.stats.tail_ms = tail_started.elapsed().as_secs_f64() * 1000.;
         self.stats.cpu_submission_ms = started.elapsed().as_secs_f64() * 1000.;
     }
 

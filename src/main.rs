@@ -1939,19 +1939,33 @@ fn run() -> Result<(), String> {
                 presented += 1;
                 last_present = Instant::now();
                 if options.profile_frames.is_some() {
+                    let stats = renderer.stats();
                     profile.record(
                         Instant::now(),
-                        renderer.stats().cpu_submission_ms,
+                        stats.cpu_submission_ms,
                         final_frame && options.screenshot.is_some(),
                         diagnostics::Frame {
                             interval_ms: 0.,
                             compose_ms,
-                            render_ms: renderer.stats().cpu_submission_ms,
+                            render_ms: stats.cpu_submission_ms,
                             swap_ms,
-                            redrawn: renderer.stats().redrawn_fraction,
-                            glyph_ms: renderer.stats().glyph_ms,
-                            vector_ms: renderer.stats().vector_load_ms,
-                            image_ms: renderer.stats().image_load_ms,
+                            redrawn: stats.redrawn_fraction,
+                            glyph_ms: stats.glyph_ms,
+                            vector_ms: stats.vector_load_ms,
+                            image_ms: stats.image_load_ms,
+                            build_ms: stats.build_ms,
+                            clear_ms: stats.clear_ms,
+                            upload_ms: stats.upload_ms,
+                            setup_ms: stats.setup_ms,
+                            draw_paint_ms: stats.draw_paint_ms,
+                            draw_vector_ms: stats.draw_vector_ms,
+                            draw_text_ms: stats.draw_text_ms,
+                            draw_ms: stats.draw_ms,
+                            tail_ms: stats.tail_ms,
+                            upload_bytes: stats.upload_bytes,
+                            paint_batches: stats.paint_batches,
+                            vector_batches: stats.vector_batches,
+                            text_batches: stats.text_batches,
                         },
                     );
                 }

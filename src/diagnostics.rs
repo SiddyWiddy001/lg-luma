@@ -14,7 +14,7 @@ pub struct Profile {
     timeline: Vec<Frame>,
 }
 /// One profiled frame: where its time went (milliseconds) and how much of it was redrawn.
-#[derive(Clone, Copy, Serialize)]
+#[derive(Clone, Copy, Default, Serialize)]
 pub struct Frame {
     pub interval_ms: f64,
     pub compose_ms: f64,
@@ -25,6 +25,20 @@ pub struct Frame {
     pub glyph_ms: f64,
     pub vector_ms: f64,
     pub image_ms: f64,
+    /// Where render_ms went this frame (see RenderStats).
+    pub build_ms: f64,
+    pub clear_ms: f64,
+    pub upload_ms: f64,
+    pub setup_ms: f64,
+    pub draw_paint_ms: f64,
+    pub draw_vector_ms: f64,
+    pub draw_text_ms: f64,
+    pub draw_ms: f64,
+    pub tail_ms: f64,
+    pub upload_bytes: usize,
+    pub paint_batches: usize,
+    pub vector_batches: usize,
+    pub text_batches: usize,
 }
 #[derive(Serialize)]
 pub struct Timing {
@@ -96,14 +110,9 @@ mod tests {
                 2.,
                 index == 19,
                 Frame {
-                    interval_ms: 0.,
-                    compose_ms: 0.,
                     render_ms: 2.,
-                    swap_ms: 0.,
                     redrawn: 1.,
-                    glyph_ms: 0.,
-                    vector_ms: 0.,
-                    image_ms: 0.,
+                    ..Frame::default()
                 },
             );
         }
