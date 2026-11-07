@@ -379,7 +379,7 @@ fn youtube_recents_uses_the_apps_vector_and_the_same_relative_logo_geometry() {
             .iter()
             .rev()
             .find_map(|draw| match draw {
-                Draw::RoundedGradient(rect, ..) => Some(*rect),
+                Draw::RoundedGradient(rect, ..) | Draw::Glass(rect, ..) => Some(*rect),
                 _ => None,
             })
             .unwrap()

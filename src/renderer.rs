@@ -59,10 +59,26 @@ impl TextStyle {
     }
 }
 
+/// A smoked-glass tile plate painted in one analytic pass: the vertical tint, a soft
+/// inner rim, a crisp rim at the edge and the top reflection. It used to be four full-face
+/// draws (gradient, 3px border, 1px border, reflection), which cost four times the fragments.
+#[derive(Clone, Copy, PartialEq)]
+pub struct Glass {
+    pub top: Color,
+    pub bottom: Color,
+    /// Crisp 1px rim right at the plate edge.
+    pub rim: f32,
+    /// Soft 3px inner rim, just inside the edge.
+    pub inner: f32,
+    /// Top reflection strength, fading to nothing at the bottom edge.
+    pub reflection: f32,
+}
+
 #[derive(Clone)]
 pub enum Draw {
     Shape(Rect, f32, f32, Color),
     RoundedGradient(Rect, f32, Color, Color),
+    Glass(Rect, f32, Glass),
     Shadow(Rect, f32, f32, Color),
     /// Focus bloom: a continuous exponential halo around `rect`, fading over `blur` pixels.
     /// Replaces the stacked flat-alpha rings that banded on dark wallpapers.
@@ -234,6 +250,12 @@ enum PaintMode {
     Monochrome,
     /// Focus bloom: the shader draws a continuous exponential halo (see `Draw::Glow`).
     Glow,
+    /// Analytic glass plate (see `Draw::Glass`). Alphas are stored as bits for exact merging.
+    Glass {
+        rim: u32,
+        inner: u32,
+        reflection: u32,
+    },
 }
 
 enum BatchKind {
@@ -294,6 +316,7 @@ struct PaintUniforms {
     icon_tint: GLint,
     app_top: GLint,
     app_bottom: GLint,
+    glass: GLint,
 }
 struct MeshUniforms {
     edge_fade: GLint,
@@ -322,6 +345,7 @@ fn full_screen_paint(command: &Draw) -> bool {
     match command {
         Draw::Shape(rect, ..)
         | Draw::RoundedGradient(rect, ..)
+        | Draw::Glass(rect, ..)
         | Draw::Image(_, rect, ..)
         | Draw::TintedImage(_, rect, ..) => full_screen(rect),
         _ => false,
@@ -420,7 +444,7 @@ fn profile_skip(command: &Draw) -> bool {
         Draw::AppImage(..) => "app",
         Draw::AppIcon(..) => "app",
         Draw::Shape(..) => "shape",
-        Draw::RoundedGradient(..) => "gradient",
+        Draw::RoundedGradient(..) | Draw::Glass(..) => "gradient",
         Draw::Shadow(..) => "shadow",
         Draw::Glow(..) => "glow",
         Draw::Text(..) => "text",
@@ -649,6 +673,7 @@ impl Renderer {
                 icon_tint: uniform(program, c"u_icon_tint"),
                 app_top: uniform(program, c"u_app_top"),
                 app_bottom: uniform(program, c"u_app_bottom"),
+                glass: uniform(program, c"u_glass"),
             },
             vector: MeshUniforms {
                 edge_fade: uniform(vector_program, c"u_edge_fade"),
@@ -857,6 +882,24 @@ impl Renderer {
             texture,
             None,
             PaintMode::Monochrome,
+        );
+    }
+
+    /// The whole tile plate in one pass: tint, both rims and the reflection.
+    fn glass_quad(&mut self, rect: Rect, radius: f32, glass: Glass) {
+        self.paint_quad(
+            rect,
+            [0., 0., 1., 1.],
+            radius,
+            0.,
+            [glass.top, glass.bottom],
+            self.white.id,
+            None,
+            PaintMode::Glass {
+                rim: glass.rim.to_bits(),
+                inner: glass.inner.to_bits(),
+                reflection: glass.reflection.to_bits(),
+            },
         );
     }
 
@@ -1800,6 +1843,7 @@ impl Renderer {
                     self.white.id,
                     None,
                 ),
+                Draw::Glass(rect, radius, glass) => self.glass_quad(*rect, *radius, *glass),
                 Draw::Shadow(rect, radius, blur, color) => self.quad(
                     rect.inset(-*blur),
                     [0., 0., 1., 1.],
@@ -2013,6 +2057,17 @@ impl Renderer {
                                 0.
                             },
                         );
+                        if let PaintMode::Glass { rim, inner, reflection } = *mode {
+                            gl::Uniform4f(
+                                self.uniforms.paint.glass,
+                                f32::from_bits(rim),
+                                f32::from_bits(inner),
+                                f32::from_bits(reflection),
+                                1.,
+                            );
+                        } else {
+                            gl::Uniform4f(self.uniforms.paint.glass, 0., 0., 0., 0.);
+                        }
                         if let Some(stops) = backdrop {
                             for (location, rgb) in [
                                 (self.uniforms.paint.app_top, stops[0]),

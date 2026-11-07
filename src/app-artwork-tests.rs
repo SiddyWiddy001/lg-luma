@@ -618,34 +618,28 @@ fn visible_cards_switch_from_fallback_to_an_inset_icon_on_a_glass_plate() {
         })
         .unwrap();
     assert_eq!(tint, [1.; 4], "the icon keeps its own alpha over the plate");
-    // The plate it sits on: a dark translucent gradient over the whole face, so the glass shows
-    // around the inset icon and a white badge stays legible on top of it. The tile's own rim
-    // reflection has the same shape, so the dark stops are what pick out the glass.
+    // The plate it sits on: one analytic smoked-glass pass over the whole face, so the glass
+    // shows around the inset icon and a white badge stays legible on top of it. The tint, both
+    // rims and the top reflection are all part of that single draw.
     let glass_on_face = |draw: &crate::renderer::Draw| match draw {
-        crate::renderer::Draw::RoundedGradient(rect, radius, top, bottom) => {
+        crate::renderer::Draw::Glass(rect, radius, glass) => {
             let dark = |stop: &[f32; 4]| (stop[0] + stop[1] + stop[2]) / 3. < 0.3;
             let covers = rect.w < 400.
                 && rect.x < face.x
                 && rect.y < face.y
                 && rect.x + rect.w > face.x + face.w
                 && rect.y + rect.h > face.y + face.h;
-            (covers && dark(top) && dark(bottom)).then_some((*rect, *radius, *top, *bottom))
+            (covers && dark(&glass.top) && dark(&glass.bottom)).then_some((*rect, *radius, *glass))
         }
         _ => None,
     };
     let plate = loaded.draw.iter().find_map(glass_on_face).unwrap();
     assert!(plate.1 > 0., "the plate is a rounded face");
-    for stop in [plate.2, plate.3] {
+    for stop in [plate.2.top, plate.2.bottom] {
         assert!(stop[3] < 1., "{stop:?} is opaque, not smoked glass");
     }
-    // The rim runs along that same face, and the icon sits centred inside it.
-    let same_face = |r: &crate::state::Rect| {
-        r.x == plate.0.x && r.y == plate.0.y && r.w == plate.0.w && r.h == plate.0.h
-    };
-    assert!(loaded.draw.iter().any(|draw| matches!(draw,
-        crate::renderer::Draw::Shape(rect, radius, border, _)
-            if same_face(rect) && *radius == plate.1 && *border == 1.
-    )));
+    assert!(plate.2.rim > 0. && plate.2.inner > 0., "the plate carries its rims");
+    // The icon sits centred inside that plate.
     let (centre_x, centre_y) = face.center();
     let (plate_x, plate_y) = plate.0.center();
     assert!(

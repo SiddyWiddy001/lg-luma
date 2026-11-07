@@ -6,6 +6,7 @@ uniform vec3 u_app_top;
 uniform vec3 u_app_bottom;
 uniform bool u_app;
 uniform float u_icon_tint;
+uniform vec4 u_glass;
 varying PAINT_PRECISION vec2 v_uv;
 varying PAINT_PRECISION vec4 v_color;
 varying PAINT_PRECISION vec4 v_shape;
@@ -22,6 +23,11 @@ float edge_coverage() {
     if (u_edge_fade_x.w > u_edge_fade_x.z)
         edge *= 1.0 - smoothstep(u_edge_fade_x.z, u_edge_fade_x.w, v_logical_x);
     return edge;
+}
+// Straight-alpha "over": the paint pass blends with SRC_ALPHA, so colours stay unpremultiplied.
+vec4 over(vec4 fg, vec4 bg) {
+    float a = fg.a + bg.a * (1.0 - fg.a);
+    return vec4((fg.rgb * fg.a + bg.rgb * bg.a * (1.0 - fg.a)) / max(a, 0.0001), a);
 }
 void main() {
     if (v_params.x < 0.0) {
@@ -62,6 +68,22 @@ void main() {
     }
     if (v_params.y > 0.0) {
         alpha *= clamp(0.5 + (d + v_params.y) / u_aa, 0.0, 1.0);
+    }
+    if (u_glass.w > 0.5) {
+        // One analytic pass for the smoked-glass plate: vertical tint (v_color), a soft 3px
+        // inner rim, a crisp 1px rim and a top reflection that fades to the bottom edge.
+        float soft = clamp(0.5 + (d + 3.0) / u_aa, 0.0, 1.0) * u_glass.y;
+        float rim = clamp(0.5 + (d + 1.0) / u_aa, 0.0, 1.0) * u_glass.x;
+        float y = v_shape.y / (2.0 * half_size.y) + 0.5;
+        float reflection = u_glass.z * (1.0 - y);
+        // Scale every layer by the rounded-rect coverage, exactly as the four separate draws did.
+        float cov = alpha;
+        vec4 plate = vec4(v_color.rgb, v_color.a * cov);
+        plate = over(vec4(1.0, 1.0, 1.0, soft * cov), plate);
+        plate = over(vec4(1.0, 1.0, 1.0, rim * cov), plate);
+        plate = over(vec4(1.0, 1.0, 1.0, reflection * cov), plate);
+        gl_FragColor = plate * vec4(1.0, 1.0, 1.0, edge_coverage());
+        return;
     }
     vec4 color = texture2D(u_texture, v_uv);
     if (u_app) {

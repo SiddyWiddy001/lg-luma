@@ -2,7 +2,7 @@
 use crate::{
     i18n::Language,
     model::{App, BACKGROUNDS, CATEGORIES, Input, InputMode},
-    renderer::{Color, Draw, TextStyle, WHITE},
+    renderer::{Color, Draw, Glass, TextStyle, WHITE},
     state::{
         APPS_COLUMNS, Control, HOME_FADE_LEFT, HOME_FADE_RIGHT, HOME_STRIP_LEFT, HOME_STRIP_RIGHT,
         HOME_TILE_PITCH, HOME_TILE_WIDTH, KEYS, Overlay, Page, Rect, SYSTEM_SECTION, State,
@@ -341,6 +341,16 @@ impl Scene {
                 Draw::RoundedGradient(_, _, a, b) => {
                     apply(a);
                     apply(b);
+                }
+                Draw::Glass(_, _, glass) => {
+                    apply(&mut glass.top);
+                    apply(&mut glass.bottom);
+                    // The rims and reflection are white; dimming their alpha toward the dark
+                    // plate reads the same as dimming their brightness.
+                    let dim = alpha * brightness;
+                    glass.rim *= dim;
+                    glass.inner *= dim;
+                    glass.reflection *= dim;
                 }
                 Draw::Image(path, rect, radius, contain) => {
                     *draw = Draw::TintedImage(
@@ -1117,19 +1127,29 @@ fn app_face(
         for channel in &mut bottom[..3] {
             *channel *= warm;
         }
-        out.draw
-            .push(Draw::RoundedGradient(rect, radius, top, bottom));
-        out.border(rect, radius, 3., c(0xffffff, 0.06));
-        out.border(rect, radius, 1., c(0xffffff, 0.24));
+        // One analytic pass for the plate, both rims and the top reflection.
+        out.draw.push(Draw::Glass(
+            rect,
+            radius,
+            Glass {
+                top,
+                bottom,
+                rim: 0.24,
+                inner: 0.06,
+                reflection: 0.09 + 0.05 * lift,
+            },
+        ));
+    } else {
+        // Glass edge reflection over the generic surface: a bright highlight along the top
+        // of the tile that fades toward the bottom, as if the glass plate were catching
+        // light from the room above it.
+        out.draw.push(Draw::RoundedGradient(
+            rect,
+            radius,
+            c(0xffffff, 0.09 + 0.05 * lift),
+            c(0xffffff, 0.),
+        ));
     }
-    // Glass edge reflection: a bright highlight along the top of the tile that fades toward
-    // the bottom, as if the glass plate were catching light from the room above it.
-    out.draw.push(Draw::RoundedGradient(
-        rect,
-        radius,
-        c(0xffffff, 0.09 + 0.05 * lift),
-        c(0xffffff, 0.),
-    ));
     let art_start = out.draw.len();
     if let Some(image) = artwork {
         // Inset so the glass shows around the icon; the icon keeps its own alpha here.
