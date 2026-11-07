@@ -983,7 +983,7 @@ impl Renderer {
     /// foreground vertices stay in their original order inside the merged buffer.
     /// Brand logos are deferred to the layer just below text; UI glyphs keep their order.
     fn flush_deferred(&mut self) {
-        let mut logo_batches = Vec::new();
+        let mut logo_batches: Vec<Batch> = Vec::new();
         for entry in self.pending_logo.drain(..) {
             if let Some(last) = logo_batches.last_mut() {
                 if same_clip(last.clip, entry.clip)
@@ -1015,7 +1015,7 @@ impl Renderer {
         }
         self.batches.extend(logo_batches);
 
-        let mut text_batches = Vec::new();
+        let mut text_batches: Vec<Batch> = Vec::new();
         for entry in self.pending_text.drain(..) {
             if let Some(last) = text_batches.last_mut() {
                 if same_clip(last.clip, entry.clip)
