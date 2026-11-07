@@ -116,7 +116,9 @@ struct TextKey {
 }
 
 struct TextRun {
-    mesh: Option<vector::Mesh>,
+    /// Raw nine-float vertices (position, offset, origin, coverage); colour is
+    /// supplied per submission so shadow and foreground runs can share a batch.
+    vertices: Vec<f32>,
     missing_glyphs: usize,
     failures: usize,
     frame: u64,
@@ -215,16 +217,18 @@ enum BatchKind {
         mode: PaintMode,
     },
     Vector {
-        path: String,
-        rect: Rect,
-        tint: Color,
+        start: usize,
+        count: usize,
         /// Curated brand logos render as cool monochrome glyphs on the glass plate.
         mono: bool,
+        /// Logos are merged into the final layer; UI glyphs keep their original order.
+        deferred: bool,
     },
     Text {
-        key: TextKey,
-        origin: [f32; 2],
-        tint: Color,
+        start: usize,
+        count: usize,
+        /// Physical emboldening for this batch, stored as bits for exact merging.
+        embolden: u32,
     },
 }
 
@@ -232,6 +236,22 @@ struct Batch {
     kind: BatchKind,
     clip: Option<Rect>,
     // [top fade-in, top end, bottom start, bottom fade-out, left ×2, right ×2]; 0 = off.
+    fade: Option<[f32; 8]>,
+}
+
+struct DeferredVector {
+    start: usize,
+    count: usize,
+    mono: bool,
+    clip: Option<Rect>,
+    fade: Option<[f32; 8]>,
+}
+
+struct DeferredText {
+    start: usize,
+    count: usize,
+    embolden: u32,
+    clip: Option<Rect>,
     fade: Option<[f32; 8]>,
 }
 
@@ -314,6 +334,14 @@ impl Scrim {
     }
 }
 
+fn same_clip(a: Option<Rect>, b: Option<Rect>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h,
+        _ => false,
+    }
+}
+
 fn intersect(a: [i32; 4], b: [i32; 4]) -> [i32; 4] {
     let x = a[0].max(b[0]);
     let y = a[1].max(b[1]);
@@ -385,12 +413,85 @@ fn uniform(program: GLuint, name: &CStr) -> GLint {
     unsafe { gl::GetUniformLocation(program, name.as_ptr()) }
 }
 
+/// Appends one vector mesh into a merged dynamic buffer with its transform and
+/// tint baked into the vertices. The shader then uses a fixed [1, 1, 0, 0]
+/// transform, so many logos can share one draw call without changing their
+/// per-logo position, size or colour.
+fn append_vector_run(
+    vertices: &mut Vec<f32>,
+    mesh: &vector::Mesh,
+    rect: Rect,
+    tint: Color,
+) -> usize {
+    let start = vertices.len() / 9;
+    let sx = (rect.w / mesh.width).abs().max(1e-6);
+    let sy = (rect.h / mesh.height).abs().max(1e-6);
+    for chunk in mesh.data.chunks_exact(9) {
+        let (px, py, ox, oy) = (chunk[0], chunk[1], chunk[2], chunk[3]);
+        let dx = ox / sx;
+        let dy = oy / sy;
+        let direction = (dx * dx + dy * dy).sqrt();
+        let length = (ox * ox + oy * oy).sqrt();
+        let offset = if direction > 1e-6 {
+            [dx / direction * length, dy / direction * length]
+        } else {
+            [0., 0.]
+        };
+        vertices.extend_from_slice(&[
+            px * sx + rect.x,
+            py * sy + rect.y,
+            offset[0],
+            offset[1],
+            chunk[4] * tint[0],
+            chunk[5] * tint[1],
+            chunk[6] * tint[2],
+            chunk[7] * tint[3],
+            chunk[8],
+        ]);
+    }
+    start
+}
+
+/// Appends one cached text run into the merged text buffer. The layout is
+/// position (2), offset (2), origin (4), colour (4), coverage (1): the final
+/// vertex colour is baked here so shadow and foreground runs can share a batch.
+fn append_text_run(
+    vertices: &mut Vec<f32>,
+    run: &TextRun,
+    origin: [f32; 2],
+    color: Color,
+    y_offset: f32,
+) -> usize {
+    let start = vertices.len() / 13;
+    for chunk in run.vertices.chunks_exact(9) {
+        vertices.extend_from_slice(&[
+            chunk[0],
+            chunk[1],
+            chunk[2],
+            chunk[3],
+            chunk[4] + origin[0],
+            chunk[5] + origin[1] + y_offset,
+            0.,
+            0.,
+            color[0],
+            color[1],
+            color[2],
+            color[3],
+            chunk[8],
+        ]);
+    }
+    start
+}
+
 pub struct Renderer {
     program: GLuint,
     vector_program: GLuint,
     text_program: GLuint,
     text_embolden: f32,
     buffer: GLuint,
+    text_buffer: GLuint,
+    vector_buffer: GLuint,
+    logo_buffer: GLuint,
     vao: GLuint,
     white: Texture,
     font_directory: PathBuf,
@@ -402,6 +503,11 @@ pub struct Renderer {
     vectors: HashMap<String, Option<vector::Mesh>>,
     artwork_variants: HashMap<String, String>,
     vertices: Vec<f32>,
+    text_vertices: Vec<f32>,
+    vector_vertices: Vec<f32>,
+    logo_vertices: Vec<f32>,
+    pending_text: Vec<DeferredText>,
+    pending_logo: Vec<DeferredVector>,
     batches: Vec<Batch>,
     clip: Option<Rect>,
     // [top fade-in, top end, bottom start, bottom fade-out, left ×2, right ×2]; 0 = off.
@@ -475,7 +581,13 @@ impl Renderer {
         let text_program = match link(
             &(vertex_prefix + include_str!("shaders/text.vert")),
             &(fragment_prefix + include_str!("shaders/vector.frag")),
-            &[c"a_position", c"a_offset", c"a_origin", c"a_coverage"],
+            &[
+                c"a_position",
+                c"a_offset",
+                c"a_origin",
+                c"a_color",
+                c"a_coverage",
+            ],
         ) {
             Ok(program) => program,
             Err(error) => {
@@ -519,6 +631,9 @@ impl Renderer {
             },
         };
         let mut buffer = 0;
+        let mut text_buffer = 0;
+        let mut vector_buffer = 0;
+        let mut logo_buffer = 0;
         let mut vao = 0;
         unsafe {
             if !gles {
@@ -526,6 +641,9 @@ impl Renderer {
                 gl::BindVertexArray(vao);
             }
             gl::GenBuffers(1, &mut buffer);
+            gl::GenBuffers(1, &mut text_buffer);
+            gl::GenBuffers(1, &mut vector_buffer);
+            gl::GenBuffers(1, &mut logo_buffer);
             gl::Enable(gl::BLEND);
             // Preserve an opaque destination alpha. Using BlendFunc for both
             // channels makes translucent UI darken again in PNG/window compositing.
@@ -545,6 +663,9 @@ impl Renderer {
             text_program,
             text_embolden,
             buffer,
+            text_buffer,
+            vector_buffer,
+            logo_buffer,
             vao,
             white,
             font_directory: directory.into(),
@@ -556,6 +677,11 @@ impl Renderer {
             vectors: HashMap::new(),
             artwork_variants: HashMap::new(),
             vertices: Vec::with_capacity(65536),
+            text_vertices: Vec::with_capacity(65536),
+            vector_vertices: Vec::with_capacity(65536),
+            logo_vertices: Vec::with_capacity(65536),
+            pending_text: Vec::new(),
+            pending_logo: Vec::new(),
             batches: Vec::new(),
             clip: None,
             fade: None,
@@ -634,7 +760,7 @@ impl Renderer {
                 }
             }
         }
-        let run_bytes = |run: &TextRun| run.mesh.as_ref().map_or(0, |mesh| mesh.bytes);
+        let run_bytes = |run: &TextRun| run.vertices.len() * size_of::<f32>();
         let mut bytes: usize = self.text_runs.values().map(run_bytes).sum();
         if bytes > TEXT_GEOMETRY_BUDGET || self.text_runs.len() > 512 {
             let mut old: Vec<_> = self
@@ -805,6 +931,105 @@ impl Renderer {
             clip: self.clip,
             fade: self.fade,
         });
+    }
+
+    /// Appends a merged vector run, joining the previous vector batch when it has
+    /// the same clip, fade, mono mode and deferred layer.
+    fn push_vector_batch(&mut self, start: usize, count: usize, mono: bool, deferred: bool) {
+        if let Some(batch) = self.batches.last_mut() {
+            if same_clip(batch.clip, self.clip)
+                && batch.fade == self.fade
+                && let BatchKind::Vector {
+                    start: previous_start,
+                    count: previous_count,
+                    mono: previous_mono,
+                    deferred: previous_deferred,
+                } = &mut batch.kind
+                && *previous_start + *previous_count == start
+                && *previous_mono == mono
+                && *previous_deferred == deferred
+            {
+                *previous_count += count;
+                return;
+            }
+        }
+        self.batches.push(Batch {
+            kind: BatchKind::Vector {
+                start,
+                count,
+                mono,
+                deferred,
+            },
+            clip: self.clip,
+            fade: self.fade,
+        });
+    }
+
+    /// Text is painted last, after every shape, image and UI icon, so all captions and
+    /// labels can merge into the few batches that share a clip and edge fade. Shadow and
+    /// foreground vertices stay in their original order inside the merged buffer.
+    /// Brand logos are deferred to the layer just below text; UI glyphs keep their order.
+    fn flush_deferred(&mut self) {
+        let mut logo_batches = Vec::new();
+        for entry in self.pending_logo.drain(..) {
+            if let Some(last) = logo_batches.last_mut() {
+                if same_clip(last.clip, entry.clip)
+                    && last.fade == entry.fade
+                    && let BatchKind::Vector {
+                        start,
+                        count,
+                        mono,
+                        deferred,
+                    } = &mut last.kind
+                    && *start + *count == entry.start
+                    && *mono == entry.mono
+                    && *deferred
+                {
+                    *count += entry.count;
+                    continue;
+                }
+            }
+            logo_batches.push(Batch {
+                kind: BatchKind::Vector {
+                    start: entry.start,
+                    count: entry.count,
+                    mono: entry.mono,
+                    deferred: true,
+                },
+                clip: entry.clip,
+                fade: entry.fade,
+            });
+        }
+        self.batches.extend(logo_batches);
+
+        let mut text_batches = Vec::new();
+        for entry in self.pending_text.drain(..) {
+            if let Some(last) = text_batches.last_mut() {
+                if same_clip(last.clip, entry.clip)
+                    && last.fade == entry.fade
+                    && let BatchKind::Text {
+                        start,
+                        count,
+                        embolden,
+                    } = &mut last.kind
+                    && *start + *count == entry.start
+                    && *embolden == entry.embolden
+                {
+                    *count += entry.count;
+                    continue;
+                }
+            }
+            text_batches.push(Batch {
+                kind: BatchKind::Text {
+                    start: entry.start,
+                    count: entry.count,
+                    embolden: entry.embolden,
+                },
+                clip: entry.clip,
+                fade: entry.fade,
+            });
+        }
+        self.batches.extend(text_batches);
     }
 
     /// The wallpaper with full-screen translucent fills folded in: each fill maps a pixel p to
@@ -1060,22 +1285,10 @@ impl Renderer {
                 }
             }
         }
-        let mesh = if vertices.is_empty() {
-            None
-        } else {
-            match vector::Mesh::upload(1., 1., &vertices) {
-                Ok(mesh) => Some(mesh),
-                Err(error) => {
-                    eprintln!("Luma text: {error}");
-                    failures += 1;
-                    None
-                }
-            }
-        };
         self.text_runs.insert(
             key.clone(),
             TextRun {
-                mesh,
+                vertices,
                 missing_glyphs,
                 failures,
                 frame: self.frame,
@@ -1092,34 +1305,48 @@ impl Renderer {
         let Some(run) = self.text_runs.get(key) else {
             return;
         };
-        if run.mesh.is_none() || color[3] <= 0. {
+        if run.vertices.is_empty() || color[3] <= 0. {
             return;
         }
         let offset = (size * 0.045).clamp(1., 4.);
-        self.batches.push(Batch {
-            kind: BatchKind::Text {
-                key: key.clone(),
-                origin: [origin[0], origin[1] + offset],
-                tint: [0., 0., 0., color[3] * 0.42],
-            },
+        let shadow = [0., 0., 0., color[3] * 0.42];
+        let start = append_text_run(&mut self.text_vertices, run, origin, shadow, offset);
+        let count = self.text_vertices.len() / 13 - start;
+        let embolden = embolden(
+            f32::from_bits(key.layout[0]) * self.stats.viewport.height / 1080.,
+            self.text_embolden,
+        );
+        self.pending_text.push(DeferredText {
+            start,
+            count,
+            embolden: embolden.to_bits(),
             clip: self.clip,
             fade: self.fade,
         });
     }
 
     fn submit_text(&mut self, key: TextKey, origin: [f32; 2], tint: Color) {
-        let run = self.text_runs.get_mut(&key).unwrap();
-        run.frame = self.frame;
+        let run = self.text_runs.get(&key).unwrap();
         self.stats.missing_glyphs += run.missing_glyphs;
         self.stats.glyph_failures += run.failures;
-        if let Some(mesh) = &run.mesh {
-            self.stats.text_triangles += mesh.vertices as usize / 3;
-            self.batches.push(Batch {
-                kind: BatchKind::Text { key, origin, tint },
-                clip: self.clip,
-                fade: self.fade,
-            });
+        if run.vertices.is_empty() {
+            return;
         }
+        self.stats.text_triangles += run.vertices.len() / 27;
+        let start = append_text_run(&mut self.text_vertices, run, origin, tint, 0.);
+        let count = self.text_vertices.len() / 13 - start;
+        let embolden = embolden(
+            f32::from_bits(key.layout[0]) * self.stats.viewport.height / 1080.,
+            self.text_embolden,
+        );
+        self.pending_text.push(DeferredText {
+            start,
+            count,
+            embolden: embolden.to_bits(),
+            clip: self.clip,
+            fade: self.fade,
+        });
+        self.text_runs.get_mut(&key).unwrap().frame = self.frame;
     }
 
     fn image(&mut self, path: &str, rect: Rect, radius: f32, contain: bool, tint: Color) {
@@ -1294,34 +1521,38 @@ impl Renderer {
         // Logos keep their size; only their placement moves onto the pixel grid.
         let snapped = snap_rect(rect, scale);
         rect = Rect::new(snapped.x, snapped.y, rect.w, rect.h);
-        let clip = if let Some(clip) = self.clip {
+        if let Some(clip) = self.clip {
             let x = rect.x.max(clip.x);
             let y = rect.y.max(clip.y);
-            Rect::new(
+            let visible = Rect::new(
                 x,
                 y,
                 (rect.x + rect.w).min(clip.x + clip.w).max(x) - x,
                 (rect.y + rect.h).min(clip.y + clip.h).max(y) - y,
-            )
-        } else {
-            rect
-        };
-        if clip.w <= 0. || clip.h <= 0. {
-            return;
+            );
+            if visible.w <= 0. || visible.h <= 0. {
+                return;
+            }
         }
         self.stats.vector_triangles += mesh.vertices as usize / 3;
-        self.batches.push(Batch {
-            kind: BatchKind::Vector {
-                path: path.into(),
-                rect,
-                tint,
-                // Curated brand artwork lives under logos/ and is tinted like an installed
-                // icon; UI glyphs (ui-icons/, clock, weather) keep their own colour.
-                mono: path.contains("logos/") || path.contains("logos\\"),
-            },
-            clip: Some(clip),
-            fade: self.fade,
-        });
+        // Curated brand artwork lives under logos/ and is tinted like an installed
+        // icon; UI glyphs (ui-icons/, clock, weather) keep their own colour.
+        let mono = path.contains("logos/") || path.contains("logos\\");
+        if mono {
+            let start = append_vector_run(&mut self.logo_vertices, mesh, rect, tint);
+            let count = self.logo_vertices.len() / 9 - start;
+            self.pending_logo.push(DeferredVector {
+                start,
+                count,
+                mono: true,
+                clip: self.clip,
+                fade: self.fade,
+            });
+        } else {
+            let start = append_vector_run(&mut self.vector_vertices, mesh, rect, tint);
+            let count = self.vector_vertices.len() / 9 - start;
+            self.push_vector_batch(start, count, false, false);
+        }
     }
 
     fn app_image(
@@ -1469,6 +1700,11 @@ impl Renderer {
         }
         self.frame += 1;
         self.vertices.clear();
+        self.text_vertices.clear();
+        self.vector_vertices.clear();
+        self.logo_vertices.clear();
+        self.pending_text.clear();
+        self.pending_logo.clear();
         self.batches.clear();
         self.clip = None;
         self.fade = None;
@@ -1561,6 +1797,7 @@ impl Renderer {
                 Draw::EdgeFadeX(fade) => self.set_fade(4, *fade),
             }
         }
+        self.flush_deferred();
     }
 
     /// Draws the scene. With `damage` (drawable pixels from `damage_pixels`), only those pixels
@@ -1605,6 +1842,33 @@ impl Renderer {
                 self.vertices.as_ptr().cast(),
                 gl::DYNAMIC_DRAW,
             );
+            if !self.text_vertices.is_empty() {
+                gl::BindBuffer(gl::ARRAY_BUFFER, self.text_buffer);
+                gl::BufferData(
+                    gl::ARRAY_BUFFER,
+                    (self.text_vertices.len() * size_of::<f32>()) as isize,
+                    self.text_vertices.as_ptr().cast(),
+                    gl::DYNAMIC_DRAW,
+                );
+            }
+            if !self.vector_vertices.is_empty() {
+                gl::BindBuffer(gl::ARRAY_BUFFER, self.vector_buffer);
+                gl::BufferData(
+                    gl::ARRAY_BUFFER,
+                    (self.vector_vertices.len() * size_of::<f32>()) as isize,
+                    self.vector_vertices.as_ptr().cast(),
+                    gl::DYNAMIC_DRAW,
+                );
+            }
+            if !self.logo_vertices.is_empty() {
+                gl::BindBuffer(gl::ARRAY_BUFFER, self.logo_buffer);
+                gl::BufferData(
+                    gl::ARRAY_BUFFER,
+                    (self.logo_vertices.len() * size_of::<f32>()) as isize,
+                    self.logo_vertices.as_ptr().cast(),
+                    gl::DYNAMIC_DRAW,
+                );
+            }
             gl::UseProgram(self.program);
             // One drawable pixel in logical units: the paint shader's edge filter width.
             gl::Uniform1f(self.uniforms.paint.aa, 1. / scale.max(0.01));
@@ -1702,38 +1966,20 @@ impl Renderer {
                         gl::DrawArrays(gl::TRIANGLES, *start as i32, *count as i32);
                     }
                     BatchKind::Vector {
-                        path,
-                        rect,
-                        tint,
+                        start,
+                        count,
                         mono,
+                        deferred,
                     } => {
-                        let Some(mesh) = self.vectors.get(path).and_then(Option::as_ref) else {
-                            continue;
-                        };
-                        self.draw_mesh(
-                            self.vector_program,
-                            mesh,
-                            [rect.w / mesh.width, rect.h / mesh.height, rect.x, rect.y],
-                            *tint,
-                            0.,
-                            if *mono { 1. } else { 0. },
-                        );
+                        self.draw_vector_batch(*start, *count, *mono, *deferred);
                         paint_bound = false;
                     }
-                    BatchKind::Text { key, origin, tint } => {
-                        let Some(mesh) = self.text_runs.get(key).and_then(|run| run.mesh.as_ref())
-                        else {
-                            continue;
-                        };
-                        let size = f32::from_bits(key.layout[0]) * vh as f32 / 1080.;
-                        self.draw_mesh(
-                            self.text_program,
-                            mesh,
-                            [1., 1., origin[0], origin[1]],
-                            *tint,
-                            embolden(size, self.text_embolden),
-                            0.,
-                        );
+                    BatchKind::Text {
+                        start,
+                        count,
+                        embolden,
+                    } => {
+                        self.draw_text_batch(*start, *count, f32::from_bits(*embolden));
                         paint_bound = false;
                     }
                 }
@@ -1775,35 +2021,58 @@ impl Renderer {
         self.stats.cpu_submission_ms = started.elapsed().as_secs_f64() * 1000.;
     }
 
-    fn draw_mesh(
-        &self,
-        program: GLuint,
-        mesh: &vector::Mesh,
-        transform: [f32; 4],
-        tint: Color,
-        embolden: f32,
-        mono: f32,
-    ) {
+    fn draw_text_batch(&self, start: usize, count: usize, embolden: f32) {
         let viewport = self.stats.viewport;
-        let uniforms = if program == self.text_program {
-            &self.uniforms.text
-        } else {
-            &self.uniforms.vector
-        };
+        let uniforms = &self.uniforms.text;
         unsafe {
-            gl::UseProgram(program);
-            if program == self.text_program {
-                gl::Uniform1f(
-                    uniforms.fringe,
-                    if self.stats.multisample_samples > 1 {
-                        0.
-                    } else {
-                        0.5
-                    },
+            gl::UseProgram(self.text_program);
+            gl::Uniform1f(
+                uniforms.fringe,
+                if self.stats.multisample_samples > 1 {
+                    0.
+                } else {
+                    0.5
+                },
+            );
+            gl::Uniform1f(uniforms.embolden, embolden);
+            gl::BindBuffer(gl::ARRAY_BUFFER, self.text_buffer);
+            let mut offset = 0;
+            for (index, size) in [2, 2, 4, 4, 1].into_iter().enumerate() {
+                gl::EnableVertexAttribArray(index as u32);
+                gl::VertexAttribPointer(
+                    index as u32,
+                    size,
+                    gl::FLOAT,
+                    gl::FALSE,
+                    52,
+                    (offset * size_of::<f32>()) as *const _,
                 );
-                gl::Uniform1f(uniforms.embolden, embolden);
+                offset += size as usize;
             }
-            gl::BindBuffer(gl::ARRAY_BUFFER, mesh.buffer);
+            gl::Uniform4f(uniforms.transform, 1., 1., 0., 0.);
+            gl::Uniform2f(
+                uniforms.pixel_scale,
+                viewport.width as f32 / 1920.,
+                viewport.height as f32 / 1080.,
+            );
+            gl::Uniform1f(uniforms.mono, 0.);
+            gl::DrawArrays(gl::TRIANGLES, start as i32, count as i32);
+        }
+    }
+
+    fn draw_vector_batch(&self, start: usize, count: usize, mono: bool, deferred: bool) {
+        let viewport = self.stats.viewport;
+        let uniforms = &self.uniforms.vector;
+        unsafe {
+            gl::UseProgram(self.vector_program);
+            gl::BindBuffer(
+                gl::ARRAY_BUFFER,
+                if deferred {
+                    self.logo_buffer
+                } else {
+                    self.vector_buffer
+                },
+            );
             gl::DisableVertexAttribArray(4);
             let mut offset = 0;
             for (index, size) in [2, 2, 4, 1].into_iter().enumerate() {
@@ -1818,21 +2087,15 @@ impl Renderer {
                 );
                 offset += size as usize;
             }
-            gl::Uniform4f(
-                uniforms.transform,
-                transform[0],
-                transform[1],
-                transform[2],
-                transform[3],
-            );
+            gl::Uniform4f(uniforms.transform, 1., 1., 0., 0.);
             gl::Uniform2f(
                 uniforms.pixel_scale,
                 viewport.width as f32 / 1920.,
                 viewport.height as f32 / 1080.,
             );
-            gl::Uniform4f(uniforms.tint, tint[0], tint[1], tint[2], tint[3]);
-            gl::Uniform1f(uniforms.mono, mono);
-            gl::DrawArrays(gl::TRIANGLES, 0, mesh.vertices);
+            gl::Uniform4f(uniforms.tint, 1., 1., 1., 1.);
+            gl::Uniform1f(uniforms.mono, if mono { 1. } else { 0. });
+            gl::DrawArrays(gl::TRIANGLES, start as i32, count as i32);
         }
     }
 

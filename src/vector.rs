@@ -8,6 +8,9 @@ pub struct Mesh {
     pub height: f32,
     pub vertices: i32,
     pub bytes: usize,
+    /// Raw triangle data retained for merged dynamic draws; the static buffer is
+    /// still uploaded once for the single-mesh path.
+    pub data: Vec<f32>,
 }
 
 impl Mesh {
@@ -73,6 +76,7 @@ impl Mesh {
             height,
             vertices: count as i32,
             bytes: count * 36,
+            data: vertices.to_vec(),
         })
     }
 }
