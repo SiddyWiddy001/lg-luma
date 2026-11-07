@@ -949,22 +949,21 @@ impl Renderer {
     /// Appends a merged vector run, joining the previous vector batch when it has
     /// the same clip, fade, mono mode and deferred layer.
     fn push_vector_batch(&mut self, start: usize, count: usize, mono: bool, deferred: bool) {
-        if let Some(batch) = self.batches.last_mut() {
-            if same_clip(batch.clip, self.clip)
-                && batch.fade == self.fade
-                && let BatchKind::Vector {
-                    start: previous_start,
-                    count: previous_count,
-                    mono: previous_mono,
-                    deferred: previous_deferred,
-                } = &mut batch.kind
-                && *previous_start + *previous_count == start
-                && *previous_mono == mono
-                && *previous_deferred == deferred
-            {
-                *previous_count += count;
-                return;
-            }
+        if let Some(batch) = self.batches.last_mut()
+            && same_clip(batch.clip, self.clip)
+            && batch.fade == self.fade
+            && let BatchKind::Vector {
+                start: previous_start,
+                count: previous_count,
+                mono: previous_mono,
+                deferred: previous_deferred,
+            } = &mut batch.kind
+            && *previous_start + *previous_count == start
+            && *previous_mono == mono
+            && *previous_deferred == deferred
+        {
+            *previous_count += count;
+            return;
         }
         self.batches.push(Batch {
             kind: BatchKind::Vector {
@@ -985,22 +984,21 @@ impl Renderer {
     fn flush_deferred(&mut self) {
         let mut logo_batches: Vec<Batch> = Vec::new();
         for entry in self.pending_logo.drain(..) {
-            if let Some(last) = logo_batches.last_mut() {
-                if same_clip(last.clip, entry.clip)
-                    && last.fade == entry.fade
-                    && let BatchKind::Vector {
-                        start,
-                        count,
-                        mono,
-                        deferred,
-                    } = &mut last.kind
-                    && *start + *count == entry.start
-                    && *mono == entry.mono
-                    && *deferred
-                {
-                    *count += entry.count;
-                    continue;
-                }
+            if let Some(last) = logo_batches.last_mut()
+                && same_clip(last.clip, entry.clip)
+                && last.fade == entry.fade
+                && let BatchKind::Vector {
+                    start,
+                    count,
+                    mono,
+                    deferred,
+                } = &mut last.kind
+                && *start + *count == entry.start
+                && *mono == entry.mono
+                && *deferred
+            {
+                *count += entry.count;
+                continue;
             }
             logo_batches.push(Batch {
                 kind: BatchKind::Vector {
@@ -1017,20 +1015,19 @@ impl Renderer {
 
         let mut text_batches: Vec<Batch> = Vec::new();
         for entry in self.pending_text.drain(..) {
-            if let Some(last) = text_batches.last_mut() {
-                if same_clip(last.clip, entry.clip)
-                    && last.fade == entry.fade
-                    && let BatchKind::Text {
-                        start,
-                        count,
-                        embolden,
-                    } = &mut last.kind
-                    && *start + *count == entry.start
-                    && *embolden == entry.embolden
-                {
-                    *count += entry.count;
-                    continue;
-                }
+            if let Some(last) = text_batches.last_mut()
+                && same_clip(last.clip, entry.clip)
+                && last.fade == entry.fade
+                && let BatchKind::Text {
+                    start,
+                    count,
+                    embolden,
+                } = &mut last.kind
+                && *start + *count == entry.start
+                && *embolden == entry.embolden
+            {
+                *count += entry.count;
+                continue;
             }
             text_batches.push(Batch {
                 kind: BatchKind::Text {
