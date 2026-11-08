@@ -2061,7 +2061,8 @@ impl Renderer {
                             rim,
                             inner,
                             reflection,
-                        } = *mode {
+                        } = *mode
+                        {
                             gl::Uniform4f(
                                 self.uniforms.paint.glass,
                                 f32::from_bits(rim),
