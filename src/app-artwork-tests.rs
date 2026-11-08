@@ -638,7 +638,10 @@ fn visible_cards_switch_from_fallback_to_an_inset_icon_on_a_glass_plate() {
     for stop in [plate.2.top, plate.2.bottom] {
         assert!(stop[3] < 1., "{stop:?} is opaque, not smoked glass");
     }
-    assert!(plate.2.rim > 0. && plate.2.inner > 0., "the plate carries its rims");
+    assert!(
+        plate.2.rim > 0. && plate.2.inner > 0.,
+        "the plate carries its rims"
+    );
     // The icon sits centred inside that plate.
     let (centre_x, centre_y) = face.center();
     let (plate_x, plate_y) = plate.0.center();
