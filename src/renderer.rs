@@ -529,7 +529,6 @@ fn append_vector_run(
     start
 }
 
-
 pub struct Renderer {
     program: GLuint,
     vector_program: GLuint,
@@ -1997,7 +1996,11 @@ impl Renderer {
             }
             upload_ms = upload_started.elapsed().as_secs_f64() * 1000.;
             upload_bytes = (self.vertices.len()
-                + if text_uploaded { self.text_vertices.len() } else { 0 }
+                + if text_uploaded {
+                    self.text_vertices.len()
+                } else {
+                    0
+                }
                 + self.vector_vertices.len()
                 + self.logo_vertices.len())
                 * size_of::<f32>();
@@ -2252,13 +2255,7 @@ impl Renderer {
                 );
                 offset += size as usize;
             }
-            gl::Uniform4f(
-                uniforms.transform,
-                1.,
-                1.,
-                origin[0],
-                origin[1] + y_offset,
-            );
+            gl::Uniform4f(uniforms.transform, 1., 1., origin[0], origin[1] + y_offset);
             gl::Uniform4f(uniforms.color, color[0], color[1], color[2], color[3]);
             gl::Uniform2f(
                 uniforms.pixel_scale,
