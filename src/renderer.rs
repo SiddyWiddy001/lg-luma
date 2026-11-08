@@ -132,9 +132,13 @@ struct TextKey {
 }
 
 struct TextRun {
-    /// Raw nine-float vertices (position, offset, origin, coverage); colour is
-    /// supplied per submission so shadow and foreground runs can share a batch.
+    /// Seven-float vertices (position, offset, glyph origin, coverage). Rect origin
+    /// and colour are supplied as uniforms, so shadow and foreground draws reuse
+    /// the same cached geometry.
     vertices: Vec<f32>,
+    /// Start and vertex count in the persistent GPU text buffer.
+    start: usize,
+    count: usize,
     missing_glyphs: usize,
     failures: usize,
     frame: u64,
@@ -279,6 +283,10 @@ enum BatchKind {
         count: usize,
         /// Physical emboldening for this batch, stored as bits for exact merging.
         embolden: u32,
+        /// Text-rect origin and shadow/foreground vertical offset.
+        origin: [f32; 2],
+        offset: f32,
+        color: Color,
     },
 }
 
@@ -301,6 +309,9 @@ struct DeferredText {
     start: usize,
     count: usize,
     embolden: u32,
+    origin: [f32; 2],
+    offset: f32,
+    color: Color,
     clip: Option<Rect>,
     fade: Option<[f32; 8]>,
 }
@@ -327,6 +338,7 @@ struct MeshUniforms {
     pixel_scale: GLint,
     tint: GLint,
     mono: GLint,
+    color: GLint,
 }
 struct Uniforms {
     paint: PaintUniforms,
@@ -517,36 +529,6 @@ fn append_vector_run(
     start
 }
 
-/// Appends one cached text run into the merged text buffer. The layout is
-/// position (2), offset (2), origin (4), colour (4), coverage (1): the final
-/// vertex colour is baked here so shadow and foreground runs can share a batch.
-fn append_text_run(
-    vertices: &mut Vec<f32>,
-    run: &TextRun,
-    origin: [f32; 2],
-    color: Color,
-    y_offset: f32,
-) -> usize {
-    let start = vertices.len() / 13;
-    for chunk in run.vertices.chunks_exact(9) {
-        vertices.extend_from_slice(&[
-            chunk[0],
-            chunk[1],
-            chunk[2],
-            chunk[3],
-            chunk[4] + origin[0],
-            chunk[5] + origin[1] + y_offset,
-            0.,
-            0.,
-            color[0],
-            color[1],
-            color[2],
-            color[3],
-            chunk[8],
-        ]);
-    }
-    start
-}
 
 pub struct Renderer {
     program: GLuint,
@@ -580,6 +562,10 @@ pub struct Renderer {
     uniforms: Uniforms,
     frame: u64,
     stats: RenderStats,
+    /// The persistent text buffer changed and must be uploaded this frame.
+    text_dirty: bool,
+    /// An opaque full-screen image base was laid out, so clearing is redundant.
+    base_covered: bool,
     pub info: GraphicsInfo,
 }
 
@@ -646,13 +632,7 @@ impl Renderer {
         let text_program = match link(
             &(vertex_prefix + include_str!("shaders/text.vert")),
             &(fragment_prefix + include_str!("shaders/vector.frag")),
-            &[
-                c"a_position",
-                c"a_offset",
-                c"a_origin",
-                c"a_color",
-                c"a_coverage",
-            ],
+            &[c"a_position", c"a_offset", c"a_glyph", c"a_coverage"],
         ) {
             Ok(program) => program,
             Err(error) => {
@@ -684,6 +664,7 @@ impl Renderer {
                 pixel_scale: uniform(vector_program, c"u_pixel_scale"),
                 tint: uniform(vector_program, c"u_tint"),
                 mono: uniform(vector_program, c"u_mono"),
+                color: uniform(vector_program, c"u_color"),
             },
             text: MeshUniforms {
                 edge_fade: uniform(text_program, c"u_edge_fade"),
@@ -694,6 +675,7 @@ impl Renderer {
                 pixel_scale: uniform(text_program, c"u_pixel_scale"),
                 tint: uniform(text_program, c"u_tint"),
                 mono: uniform(text_program, c"u_mono"),
+                color: uniform(text_program, c"u_color"),
             },
         };
         let mut buffer = 0;
@@ -754,6 +736,8 @@ impl Renderer {
             uniforms,
             frame: 0,
             stats: RenderStats::new(Size::HD),
+            text_dirty: false,
+            base_covered: false,
             info: GraphicsInfo {
                 vendor: gl_string(gl::VENDOR),
                 renderer: gl_string(gl::RENDERER),
@@ -844,6 +828,16 @@ impl Renderer {
                     bytes -= run_bytes(&run);
                 }
             }
+        }
+        if self.text_vertices.len() * size_of::<f32>() > TEXT_GEOMETRY_BUDGET {
+            // Drop geometry of runs that were trimmed; live runs get fresh starts.
+            let mut cache = Vec::new();
+            for run in self.text_runs.values_mut() {
+                run.start = cache.len() / 7;
+                cache.extend_from_slice(&run.vertices);
+            }
+            self.text_vertices = cache;
+            self.text_dirty = true;
         }
         self.stats.cached_glyphs = self.glyphs.len();
         self.stats.glyph_geometry_bytes = self.glyphs.values().map(glyph_bytes).sum();
@@ -1093,9 +1087,15 @@ impl Renderer {
                     start,
                     count,
                     embolden,
+                    origin,
+                    offset,
+                    color,
                 } = &mut last.kind
                 && *start + *count == entry.start
                 && *embolden == entry.embolden
+                && *origin == entry.origin
+                && *offset == entry.offset
+                && *color == entry.color
             {
                 *count += entry.count;
                 continue;
@@ -1105,6 +1105,9 @@ impl Renderer {
                     start: entry.start,
                     count: entry.count,
                     embolden: entry.embolden,
+                    origin: entry.origin,
+                    offset: entry.offset,
+                    color: entry.color,
                 },
                 clip: entry.clip,
                 fade: entry.fade,
@@ -1353,8 +1356,6 @@ impl Renderer {
                                 if multisampled { 0. } else { vertex.offset[1] },
                                 x,
                                 baseline,
-                                0.,
-                                0.,
                                 vertex.coverage,
                             ]);
                         }
@@ -1366,10 +1367,16 @@ impl Renderer {
                 }
             }
         }
+        let start = self.text_vertices.len() / 7;
+        let count = vertices.len() / 7;
+        self.text_vertices.extend_from_slice(&vertices);
+        self.text_dirty = true;
         self.text_runs.insert(
             key.clone(),
             TextRun {
                 vertices,
+                start,
+                count,
                 missing_glyphs,
                 failures,
                 frame: self.frame,
@@ -1391,8 +1398,8 @@ impl Renderer {
         }
         let offset = (size * 0.045).clamp(1., 4.);
         let shadow = [0., 0., 0., color[3] * 0.42];
-        let start = append_text_run(&mut self.text_vertices, run, origin, shadow, offset);
-        let count = self.text_vertices.len() / 13 - start;
+        let start = run.start;
+        let count = run.count;
         let embolden = embolden(
             f32::from_bits(key.layout[0]) * self.stats.viewport.height as f32 / 1080.,
             self.text_embolden,
@@ -1401,6 +1408,9 @@ impl Renderer {
             start,
             count,
             embolden: embolden.to_bits(),
+            origin,
+            offset,
+            color: shadow,
             clip: self.clip,
             fade: self.fade,
         });
@@ -1413,9 +1423,9 @@ impl Renderer {
         if run.vertices.is_empty() {
             return;
         }
-        self.stats.text_triangles += run.vertices.len() / 27;
-        let start = append_text_run(&mut self.text_vertices, run, origin, tint, 0.);
-        let count = self.text_vertices.len() / 13 - start;
+        self.stats.text_triangles += run.vertices.len() / 21;
+        let start = run.start;
+        let count = run.count;
         let embolden = embolden(
             f32::from_bits(key.layout[0]) * self.stats.viewport.height as f32 / 1080.,
             self.text_embolden,
@@ -1424,6 +1434,9 @@ impl Renderer {
             start,
             count,
             embolden: embolden.to_bits(),
+            origin,
+            offset: 0.,
+            color: tint,
             clip: self.clip,
             fade: self.fade,
         });
@@ -1515,6 +1528,16 @@ impl Renderer {
             let w = texture.width as f32 * scale;
             let h = texture.height as f32 * scale;
             rect = Rect::new(rect.x + (rect.w - w) / 2., rect.y + (rect.h - h) / 2., w, h);
+        }
+        if self.clip.is_none()
+            && self.fade.is_none()
+            && full_screen(&rect)
+            && radius <= 0.
+            && tint[3] >= 1.
+        {
+            // The opaque wallpaper overwrites every pixel, so a separate clear
+            // would only add another full-screen memory pass.
+            self.base_covered = true;
         }
         if scrims.is_empty() {
             self.quad(rect, [0., 0., 1., 1.], plain_radius(radius), 0., tint, id);
@@ -1781,7 +1804,6 @@ impl Renderer {
         }
         self.frame += 1;
         self.vertices.clear();
-        self.text_vertices.clear();
         self.vector_vertices.clear();
         self.logo_vertices.clear();
         self.pending_text.clear();
@@ -1789,6 +1811,7 @@ impl Renderer {
         self.batches.clear();
         self.clip = None;
         self.fade = None;
+        self.base_covered = false;
         let mut index = 0;
         while index < commands.len() {
             let command = &commands[index];
@@ -1924,9 +1947,13 @@ impl Renderer {
             gl::Viewport(0, 0, width as i32, height as i32);
             scissor(damage);
             let clear_started = Instant::now();
-            gl::ClearColor(0.04, 0.04, 0.05, 1.);
-            gl::Clear(gl::COLOR_BUFFER_BIT);
-            clear_ms = clear_started.elapsed().as_secs_f64() * 1000.;
+            if self.base_covered {
+                clear_ms = 0.;
+            } else {
+                gl::ClearColor(0.04, 0.04, 0.05, 1.);
+                gl::Clear(gl::COLOR_BUFFER_BIT);
+                clear_ms = clear_started.elapsed().as_secs_f64() * 1000.;
+            }
             gl::Viewport(vx, vy, vw, vh);
             let upload_started = Instant::now();
             if self.vao != 0 {
@@ -1939,7 +1966,8 @@ impl Renderer {
                 self.vertices.as_ptr().cast(),
                 gl::DYNAMIC_DRAW,
             );
-            if !self.text_vertices.is_empty() {
+            let text_uploaded = self.text_dirty && !self.text_vertices.is_empty();
+            if text_uploaded {
                 gl::BindBuffer(gl::ARRAY_BUFFER, self.text_buffer);
                 gl::BufferData(
                     gl::ARRAY_BUFFER,
@@ -1947,6 +1975,7 @@ impl Renderer {
                     self.text_vertices.as_ptr().cast(),
                     gl::DYNAMIC_DRAW,
                 );
+                self.text_dirty = false;
             }
             if !self.vector_vertices.is_empty() {
                 gl::BindBuffer(gl::ARRAY_BUFFER, self.vector_buffer);
@@ -1968,7 +1997,7 @@ impl Renderer {
             }
             upload_ms = upload_started.elapsed().as_secs_f64() * 1000.;
             upload_bytes = (self.vertices.len()
-                + self.text_vertices.len()
+                + if text_uploaded { self.text_vertices.len() } else { 0 }
                 + self.vector_vertices.len()
                 + self.logo_vertices.len())
                 * size_of::<f32>();
@@ -2101,8 +2130,18 @@ impl Renderer {
                         start,
                         count,
                         embolden,
+                        origin,
+                        offset,
+                        color,
                     } => {
-                        self.draw_text_batch(*start, *count, f32::from_bits(*embolden));
+                        self.draw_text_batch(
+                            *start,
+                            *count,
+                            f32::from_bits(*embolden),
+                            *origin,
+                            *offset,
+                            *color,
+                        );
                         paint_bound = false;
                     }
                 }
@@ -2177,7 +2216,15 @@ impl Renderer {
         self.stats.cpu_submission_ms = started.elapsed().as_secs_f64() * 1000.;
     }
 
-    fn draw_text_batch(&self, start: usize, count: usize, embolden: f32) {
+    fn draw_text_batch(
+        &self,
+        start: usize,
+        count: usize,
+        embolden: f32,
+        origin: [f32; 2],
+        y_offset: f32,
+        color: Color,
+    ) {
         let viewport = self.stats.viewport;
         let uniforms = &self.uniforms.text;
         unsafe {
@@ -2193,19 +2240,26 @@ impl Renderer {
             gl::Uniform1f(uniforms.embolden, embolden);
             gl::BindBuffer(gl::ARRAY_BUFFER, self.text_buffer);
             let mut offset = 0;
-            for (index, size) in [2, 2, 4, 4, 1].into_iter().enumerate() {
+            for (index, size) in [2, 2, 2, 1].into_iter().enumerate() {
                 gl::EnableVertexAttribArray(index as u32);
                 gl::VertexAttribPointer(
                     index as u32,
                     size,
                     gl::FLOAT,
                     gl::FALSE,
-                    52,
+                    28,
                     (offset * size_of::<f32>()) as *const _,
                 );
                 offset += size as usize;
             }
-            gl::Uniform4f(uniforms.transform, 1., 1., 0., 0.);
+            gl::Uniform4f(
+                uniforms.transform,
+                1.,
+                1.,
+                origin[0],
+                origin[1] + y_offset,
+            );
+            gl::Uniform4f(uniforms.color, color[0], color[1], color[2], color[3]);
             gl::Uniform2f(
                 uniforms.pixel_scale,
                 viewport.width as f32 / 1920.,
