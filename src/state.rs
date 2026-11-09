@@ -510,8 +510,7 @@ impl State {
             self.voice_preview = None;
         }
         let target =
-            if (self.voice_active || self.voice_preview.is_some()) && self.preferences.voice_orb
-            {
+            if (self.voice_active || self.voice_preview.is_some()) && self.preferences.voice_orb {
                 1.
             } else {
                 0.
