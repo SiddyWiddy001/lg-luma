@@ -83,6 +83,10 @@ pub enum Draw {
     /// Focus bloom: a continuous exponential halo around `rect`, fading over `blur` pixels.
     /// Replaces the stacked flat-alpha rings that banded on dark wallpapers.
     Glow(Rect, f32, f32, Color),
+    /// Reactive voice orb. `rect` bounds its glow for damage, the second value is the
+    /// smoothed 0..1 audio level, the third the 0..1 fade, and the fourth its time in
+    /// seconds. Drawn last with additive blending, over every other command.
+    Orb(Rect, f32, f32, f32),
     Text(String, Rect, TextStyle, Color, bool),
     Image(String, Rect, f32, bool),
     TintedImage(String, Rect, f32, bool, Color),
@@ -344,6 +348,23 @@ struct Uniforms {
     paint: PaintUniforms,
     vector: MeshUniforms,
     text: MeshUniforms,
+    orb: OrbUniforms,
+}
+
+/// Cached locations for the voice-orb program.
+struct OrbUniforms {
+    time: GLint,
+    level: GLint,
+    radius: GLint,
+    aspect: GLint,
+    alpha: GLint,
+}
+
+#[derive(Clone, Copy)]
+struct OrbState {
+    level: f32,
+    alpha: f32,
+    time: f32,
 }
 
 fn full_screen(rect: &Rect) -> bool {
@@ -459,6 +480,7 @@ fn profile_skip(command: &Draw) -> bool {
         Draw::RoundedGradient(..) | Draw::Glass(..) => "gradient",
         Draw::Shadow(..) => "shadow",
         Draw::Glow(..) => "glow",
+        Draw::Orb(..) => "orb",
         Draw::Text(..) => "text",
         Draw::Clip(_) | Draw::EdgeFade(_) | Draw::EdgeFadeX(_) => return false,
     };
@@ -533,11 +555,13 @@ pub struct Renderer {
     program: GLuint,
     vector_program: GLuint,
     text_program: GLuint,
+    orb_program: GLuint,
     text_embolden: f32,
     buffer: GLuint,
     text_buffer: GLuint,
     vector_buffer: GLuint,
     logo_buffer: GLuint,
+    orb_buffer: GLuint,
     vao: GLuint,
     white: Texture,
     font_directory: PathBuf,
@@ -559,6 +583,7 @@ pub struct Renderer {
     // [top fade-in, top end, bottom start, bottom fade-out, left ×2, right ×2]; 0 = off.
     fade: Option<[f32; 8]>,
     uniforms: Uniforms,
+    orb: Option<OrbState>,
     frame: u64,
     stats: RenderStats,
     /// The persistent text buffer changed and must be uploaded this frame.
@@ -642,6 +667,42 @@ impl Renderer {
                 return Err(error);
             }
         };
+        // The orb shader is deliberately self-contained: its first line is
+        // `precision mediump float;`, and it needs no paint/vector macros.
+        let orb_vertex_prefix = if gles {
+            "#version 100\n"
+        } else {
+            "#version 150\n#define attribute in\n#define varying out\n"
+        };
+        let orb_fragment_prefix = if gles {
+            "#version 100\n"
+        } else {
+            "#version 150\n#define varying in\nout vec4 out_color;\n#define gl_FragColor out_color\n"
+        };
+        // The file's first line is `precision mediump float;` for the TV's GLES
+        // build; desktop GLSL 150 does not accept a `precision` statement.
+        let orb_fragment = if gles {
+            include_str!("shaders/orb.frag")
+        } else {
+            include_str!("shaders/orb.frag")
+                .strip_prefix("precision mediump float;\n")
+                .unwrap_or_else(|| include_str!("shaders/orb.frag"))
+        };
+        let orb_program = match link(
+            &(orb_vertex_prefix.to_owned() + include_str!("shaders/orb.vert")),
+            &(orb_fragment_prefix.to_owned() + orb_fragment),
+            &[c"a_position"],
+        ) {
+            Ok(program) => program,
+            Err(error) => {
+                unsafe {
+                    gl::DeleteProgram(program);
+                    gl::DeleteProgram(vector_program);
+                    gl::DeleteProgram(text_program);
+                }
+                return Err(error);
+            }
+        };
         let uniforms = Uniforms {
             paint: PaintUniforms {
                 aa: uniform(program, c"u_aa"),
@@ -676,11 +737,19 @@ impl Renderer {
                 mono: uniform(text_program, c"u_mono"),
                 color: uniform(text_program, c"u_color"),
             },
+            orb: OrbUniforms {
+                time: uniform(orb_program, c"uTime"),
+                level: uniform(orb_program, c"uAudioLevel"),
+                radius: uniform(orb_program, c"uRadius"),
+                aspect: uniform(orb_program, c"uAspect"),
+                alpha: uniform(orb_program, c"uAlpha"),
+            },
         };
         let mut buffer = 0;
         let mut text_buffer = 0;
         let mut vector_buffer = 0;
         let mut logo_buffer = 0;
+        let mut orb_buffer = 0;
         let mut vao = 0;
         unsafe {
             if !gles {
@@ -691,6 +760,16 @@ impl Renderer {
             gl::GenBuffers(1, &mut text_buffer);
             gl::GenBuffers(1, &mut vector_buffer);
             gl::GenBuffers(1, &mut logo_buffer);
+            gl::GenBuffers(1, &mut orb_buffer);
+            // One full-screen triangle strip; the fragment shader carves the orb out of it.
+            let quad = [-1.0f32, -1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0];
+            gl::BindBuffer(gl::ARRAY_BUFFER, orb_buffer);
+            gl::BufferData(
+                gl::ARRAY_BUFFER,
+                (quad.len() * size_of::<f32>()) as isize,
+                quad.as_ptr().cast(),
+                gl::STATIC_DRAW,
+            );
             gl::Enable(gl::BLEND);
             // Preserve an opaque destination alpha. Using BlendFunc for both
             // channels makes translucent UI darken again in PNG/window compositing.
@@ -708,11 +787,13 @@ impl Renderer {
             program,
             vector_program,
             text_program,
+            orb_program,
             text_embolden,
             buffer,
             text_buffer,
             vector_buffer,
             logo_buffer,
+            orb_buffer,
             vao,
             white,
             font_directory: directory.into(),
@@ -733,6 +814,7 @@ impl Renderer {
             clip: None,
             fade: None,
             uniforms,
+            orb: None,
             frame: 0,
             stats: RenderStats::new(Size::HD),
             text_dirty: false,
@@ -1810,6 +1892,7 @@ impl Renderer {
         self.batches.clear();
         self.clip = None;
         self.fade = None;
+        self.orb = None;
         self.base_covered = false;
         let mut index = 0;
         while index < commands.len() {
@@ -1899,6 +1982,13 @@ impl Renderer {
                     self.app_image(image, *rect, *radius, *tint)
                 }
                 Draw::AppIcon(image, rect, tint) => self.app_icon(image, *rect, *tint),
+                Draw::Orb(_, level, alpha, time) => {
+                    self.orb = Some(OrbState {
+                        level: *level,
+                        alpha: *alpha,
+                        time: *time,
+                    })
+                }
                 Draw::Clip(clip) => self.clip = *clip,
                 Draw::EdgeFade(fade) => self.set_fade(0, *fade),
                 Draw::EdgeFadeX(fade) => self.set_fade(4, *fade),
@@ -2155,6 +2245,30 @@ impl Renderer {
                     BatchKind::Text { .. } => draw_text_ms += batch_ms,
                 }
             }
+            if let Some(orb) = self.orb {
+                // The orb is the last command: keep the frame's damage scissor so a
+                // partial redraw does not stack additive light outside it, then
+                // switch to straight additive and restore the UI blend for the
+                // next frame.
+                scissor(damage);
+                gl::UseProgram(self.orb_program);
+                gl::BindBuffer(gl::ARRAY_BUFFER, self.orb_buffer);
+                gl::EnableVertexAttribArray(0);
+                gl::VertexAttribPointer(0, 2, gl::FLOAT, gl::FALSE, 0, std::ptr::null());
+                gl::Uniform1f(self.uniforms.orb.time, orb.time);
+                gl::Uniform1f(self.uniforms.orb.level, orb.level);
+                gl::Uniform1f(self.uniforms.orb.radius, 0.16);
+                gl::Uniform1f(self.uniforms.orb.aspect, vw as f32 / vh.max(1) as f32);
+                gl::Uniform1f(self.uniforms.orb.alpha, orb.alpha);
+                gl::BlendFuncSeparate(gl::ONE, gl::ONE, gl::ZERO, gl::ONE);
+                gl::DrawArrays(gl::TRIANGLE_STRIP, 0, 4);
+                gl::BlendFuncSeparate(
+                    gl::SRC_ALPHA,
+                    gl::ONE_MINUS_SRC_ALPHA,
+                    gl::ONE,
+                    gl::ONE_MINUS_SRC_ALPHA,
+                );
+            }
             draw_ms = draw_started.elapsed().as_secs_f64() * 1000.;
             gl::Disable(gl::SCISSOR_TEST);
         }
@@ -2190,7 +2304,7 @@ impl Renderer {
         self.stats.vector_meshes = self.vectors.values().flatten().count();
         self.stats.vector_bytes = self.vectors.values().flatten().map(|mesh| mesh.bytes).sum();
         self.stats.artwork_bytes = bytes + self.stats.vector_bytes;
-        self.stats.draw_calls = self.batches.len();
+        self.stats.draw_calls = self.batches.len() + if self.orb.is_some() { 1 } else { 0 };
         self.stats.paint_batches = self
             .batches
             .iter()
@@ -2507,6 +2621,8 @@ impl Drop for Renderer {
             gl::DeleteProgram(self.program);
             gl::DeleteProgram(self.vector_program);
             gl::DeleteProgram(self.text_program);
+            gl::DeleteProgram(self.orb_program);
+            gl::DeleteBuffers(1, &self.orb_buffer);
             if self.vao != 0 {
                 gl::DeleteVertexArrays(1, &self.vao);
             }

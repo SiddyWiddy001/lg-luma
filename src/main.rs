@@ -32,6 +32,7 @@ mod tile_editor;
 mod update;
 mod vector;
 mod view;
+mod voice;
 mod wallpaper_cycle;
 mod wallpapers;
 mod weather;
@@ -863,6 +864,13 @@ fn run() -> Result<(), String> {
     let mut captured = None;
     let mut last_drawable = None;
     let mut events = sdl.event_pump()?;
+    // The remote's voice key (evdev 428) never reaches SDL's scancode map, so a
+    // worker watches /dev/input and wakes this loop with a user event. When the
+    // device is unreadable (non-root), the Settings row still previews the orb.
+    let event_subsystem = sdl.event()?;
+    // SAFETY: registered before any voice event is pushed.
+    let voice_event = unsafe { event_subsystem.register_event()? };
+    let _voice = voice::Voice::start(voice_event, event_subsystem.event_sender());
     // Lifecycle as Home: sam sends "relaunch" (bring the running Luma to the front) instead of
     // killing and restarting it, and "close" when it wants Luma to exit. `end_registration`
     // drops a staged Home's registration (webOS 10/11) if a relaunch did not reach the front.
@@ -1316,6 +1324,17 @@ fn run() -> Result<(), String> {
             let mut pending = vec![];
             match event {
                 Event::Quit { .. } => running = false,
+                Event::User { type_, code, .. } if type_ == voice_event => {
+                    // Best effort: the orb follows the mic key when the device is
+                    // readable, and is otherwise previewed from Settings.
+                    if state.preferences.voice_orb {
+                        state.voice_active = code != 0;
+                        if state.voice_active {
+                            state.voice_time = 0.;
+                        }
+                        state.dirty = true;
+                    }
+                }
                 Event::User { type_, code, .. } if Some(type_) == lifecycle_event => {
                     if code == 1 {
                         press = None;
@@ -1747,6 +1766,7 @@ fn run() -> Result<(), String> {
         // glide; 1/30 s also covers a genuinely slow frame without stalling the ramp.
         let ease = last_frame.elapsed().as_secs_f32().min(1. / 30.);
         last_frame = Instant::now();
+        state.update_voice(ease);
         if state.preferences.language != navigation_language {
             navigation_language = state.preferences.language;
             navigation = view::navigation(&assets, navigation_language);

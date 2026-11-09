@@ -361,7 +361,7 @@ impl Scene {
                         [brightness, brightness, brightness, alpha],
                     );
                 }
-                Draw::Clip(_) | Draw::EdgeFade(_) | Draw::EdgeFadeX(_) => {}
+                Draw::Clip(_) | Draw::EdgeFade(_) | Draw::EdgeFadeX(_) | Draw::Orb(..) => {}
             }
         }
     }
@@ -630,6 +630,7 @@ pub fn scene_with_pill(
         if let Some((notice, _)) = &state.notice {
             toast(&mut out, state, assets, notice);
         }
+        voice_orb(&mut out, state);
         return out;
     }
     let viewport = state.content_viewport();
@@ -836,7 +837,22 @@ pub fn scene_with_pill(
     if let Some((notice, _)) = &state.notice {
         toast(&mut out, state, assets, notice);
     }
+    voice_orb(&mut out, state);
     out
+}
+
+fn voice_orb(out: &mut Scene, state: &State) {
+    if !state.preferences.voice_orb || state.voice_fade <= 0.001 {
+        return;
+    }
+    // The shader draws a full-screen quad centered on the logical screen; the
+    // rect only bounds damage and the exponential glow around the core.
+    out.draw.push(Draw::Orb(
+        Rect::new(460., 40., 1000., 1000.),
+        state.voice_level,
+        state.voice_fade,
+        state.voice_time,
+    ));
 }
 
 fn header(
@@ -2634,6 +2650,17 @@ fn settings_content(out: &mut Scene, state: &State, assets: &Assets) {
                     "reducedMotion",
                     "motion",
                     Some(if state.preferences.reduced_motion {
+                        language.t("stateOn")
+                    } else {
+                        language.t("stateOff")
+                    }),
+                    false,
+                ),
+                (
+                    6,
+                    "voiceOrb",
+                    "voice",
+                    Some(if state.preferences.voice_orb {
                         language.t("stateOn")
                     } else {
                         language.t("stateOff")

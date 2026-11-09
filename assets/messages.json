@@ -1154,6 +1154,21 @@
     "nl": "Minder beweging",
     "sv": "Minskad rörelse"
   },
+  "voiceOrb": {
+    "zh-tw": "語音光球",
+    "en": "Voice orb",
+    "de": "Sprachorb",
+    "es": "Orbe de voz",
+    "zh": "语音光球",
+    "pt": "Orbe de voz",
+    "it": "Sfera vocale",
+    "ru": "Голосовая сфера",
+    "pl": "Kula głosowa",
+    "fr": "Orbe vocal",
+    "vi": "Quả cầu giọng nói",
+    "nl": "Spraakbol",
+    "sv": "Röstorb"
+  },
   "refreshApps": {
     "zh-tw": "重新整理應用程式和輸入來源",
     "en": "Refresh apps & inputs",

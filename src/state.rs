@@ -27,6 +27,10 @@ pub const HOME_TILE_PITCH: f32 = 281.6;
 pub const HOME_FADE_LEFT: f32 = 8.;
 pub const HOME_FADE_RIGHT: f32 = 1910.;
 pub const BACKGROUND_FADE: f32 = 0.4;
+/// The voice orb's fade-in/out, driven by the frame delta so it stays ~0.2 s.
+pub const VOICE_FADE: f32 = 0.2;
+/// How long the Settings row previews the orb when the mic key is unavailable.
+pub const VOICE_PREVIEW: Duration = Duration::from_millis(1600);
 pub const CYCLE_FADE: f32 = 1.6;
 
 pub fn unix_now() -> u64 {
@@ -280,6 +284,17 @@ pub struct State {
     /// The app whose icon is zooming out on launch, if one started this frame. The frame
     /// loop keeps the scene dirty while it animates and clears it when the fade finishes.
     pub launch_zoom: Option<LaunchZoom>,
+    /// The remote's voice key is held (best effort; see `voice`).
+    pub voice_active: bool,
+    /// 0..1 fade for the voice orb, advanced by the frame loop over ~0.2 s.
+    pub voice_fade: f32,
+    /// Smoothed 0..1 level driving the orb's pulse. Simulated until the TV's
+    /// real capture path is verified.
+    pub voice_level: f32,
+    /// Seconds since the orb became active, used for its idle pulse.
+    pub voice_time: f32,
+    /// A short settings-row preview so the orb works without the mic key.
+    pub voice_preview: Option<Instant>,
 }
 
 impl State {
@@ -328,6 +343,11 @@ impl State {
             app_lift: HashMap::new(),
             press_depth: 0.,
             launch_zoom: None,
+            voice_active: false,
+            voice_fade: 0.,
+            voice_level: 0.,
+            voice_time: 0.,
+            voice_preview: None,
         }
     }
 
@@ -470,11 +490,52 @@ impl State {
             // falling back to the idle wait and jumping the rest of the way.
             || self.scroll != self.scroll_target
             || self.home_scroll != self.home_scroll_target
+            || self.voice_active
+            || self.voice_preview.is_some()
+            || self.voice_fade > 0.
             || (!self.preferences.reduced_motion
                 && self
                     .notice
                     .as_ref()
                     .is_some_and(|(_, start)| start.elapsed() < Duration::from_millis(120)))
+    }
+
+    /// Advances the voice orb's fade and smoothed level. `dt` is the frame delta
+    /// clamped by the loop, so the 0.2 s fade does not depend on frame rate.
+    pub fn update_voice(&mut self, dt: f32) {
+        if self
+            .voice_preview
+            .is_some_and(|start| start.elapsed() >= VOICE_PREVIEW)
+        {
+            self.voice_preview = None;
+        }
+        let target = if (self.voice_active || self.voice_preview.is_some())
+            && self.preferences.voice_orb
+        {
+            1.
+        } else {
+            0.
+        };
+        let step = dt / VOICE_FADE;
+        if self.voice_fade < target {
+            self.voice_fade = (self.voice_fade + step).min(target);
+        } else if self.voice_fade > target {
+            self.voice_fade = (self.voice_fade - step).max(target);
+        }
+        if self.voice_fade > 0. {
+            self.voice_time += dt;
+            // REAL AUDIO PLUG POINT: `real_voice_level` returns the RMS of the
+            // webOS `voiceinput` socket PCM once that capture is verified.
+            let level =
+                real_voice_level().unwrap_or_else(|| simulated_voice_level(self.voice_time));
+            self.voice_level += (level - self.voice_level) * (1. - (-10. * dt).exp());
+            self.dirty = true;
+        } else {
+            // Repaint once more so the last orb is removed from the frame.
+            self.dirty |= self.voice_fade == 0. && self.voice_time > 0.;
+            self.voice_level = 0.;
+            self.voice_time = 0.;
+        }
     }
 
     /// Home's lifecycle relaunch returns directly to Home, even from an overlay.
@@ -2346,6 +2407,16 @@ impl State {
                         return vec![];
                     }
                     2 => self.preferences.reduced_motion = !self.preferences.reduced_motion,
+                    6 => {
+                        self.preferences.voice_orb = !self.preferences.voice_orb;
+                        if self.preferences.voice_orb {
+                            self.voice_time = 0.;
+                            self.voice_preview = Some(Instant::now());
+                        } else {
+                            self.voice_preview = None;
+                            self.voice_active = false;
+                        }
+                    }
                     4 => {
                         self.subpage = Some(Subpage::Language);
                         self.focus = Target::Choice(self.preferences.language.index());
@@ -2701,4 +2772,20 @@ impl State {
             self.open_recents()
         }
     }
+}
+
+/// SIMULATED AUDIO: a synthetic envelope so the orb can be reviewed before the
+/// remote mic's PCM path is wired in. It is not captured audio.
+fn simulated_voice_level(time: f32) -> f32 {
+    let wave = (time * 6.4).sin() * 0.5 + 0.5;
+    let grain = (time * 23.7 + (time * 3.1).sin()).sin() * 0.5 + 0.5;
+    (0.18 + wave * 0.52 + grain * 0.3).min(1.)
+}
+
+/// REAL AUDIO PLUG POINT. The remote mic's PCM is only reachable through
+/// `com.webos.service.voiceinput` (`/tmp/voiceinput_remote1.soc`) on this TV.
+/// Once that capture is verified, compute its RMS here (16-bit little-endian,
+/// mono) and return `Some(level)`; `None` keeps the simulated level.
+fn real_voice_level() -> Option<f32> {
+    None
 }

@@ -226,6 +226,9 @@ pub struct Preferences {
     pub show_app_names: bool,
     pub hour_24: bool,
     pub reduced_motion: bool,
+    /// Show the reactive voice orb while the remote's mic key is held. The
+    /// settings row also previews it when no mic key is available.
+    pub voice_orb: bool,
     pub show_seconds: bool,
     /// Optional name appended to the Home greeting ("Good evening, Ana."). Empty = plain greeting.
     pub greeting_name: String,
@@ -269,6 +272,7 @@ impl Default for Preferences {
             show_app_names: true,
             hour_24: false,
             reduced_motion: false,
+            voice_orb: true,
             show_seconds: false,
             greeting_name: String::new(),
             show_greeting: true,

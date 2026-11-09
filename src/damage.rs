@@ -91,6 +91,7 @@ pub fn bounds(command: &Draw) -> Option<Rect> {
         | Draw::AppIcon(_, rect, _) => Some(rect.inset(-1.)),
         Draw::Shadow(rect, _, blur, _) => Some(rect.inset(-blur - 1.)),
         Draw::Glow(rect, _, blur, _) => Some(rect.inset(-blur - 1.)),
+        Draw::Orb(rect, ..) => Some(rect.inset(-1.)),
         // Glyphs may extend past their layout box: redraw the full width of the line.
         Draw::Text(_, rect, style, ..) => Some(Rect::new(
             0.,
@@ -119,6 +120,9 @@ fn same(a: &Draw, b: &Draw) -> bool {
         }
         (Draw::Glow(r1, a1, b1, c1), Draw::Glow(r2, a2, b2, c2)) => {
             rect(r1, r2) && a1 == a2 && b1 == b2 && c1 == c2
+        }
+        (Draw::Orb(r1, l1, a1, t1), Draw::Orb(r2, l2, a2, t2)) => {
+            rect(r1, r2) && l1 == l2 && a1 == a2 && t1 == t2
         }
         (Draw::Text(t1, r1, s1, c1, x1), Draw::Text(t2, r2, s2, c2, x2)) => {
             t1 == t2
