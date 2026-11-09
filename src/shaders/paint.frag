@@ -82,7 +82,7 @@ void main() {
         plate = over(vec4(1.0, 1.0, 1.0, soft * cov), plate);
         plate = over(vec4(1.0, 1.0, 1.0, rim * cov), plate);
         plate = over(vec4(1.0, 1.0, 1.0, reflection * cov), plate);
-        gl_FragColor = plate * vec4(1.0, 1.0, 1.0, edge_coverage());
+        gl_FragColor = vec4(plate.rgb, plate.a * edge_coverage());
         return;
     }
     vec4 color = texture2D(u_texture, v_uv);
