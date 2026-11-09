@@ -686,7 +686,7 @@ impl Renderer {
         } else {
             include_str!("shaders/orb.frag")
                 .strip_prefix("precision mediump float;\n")
-                .unwrap_or_else(|| include_str!("shaders/orb.frag"))
+                .unwrap_or(include_str!("shaders/orb.frag"))
         };
         let orb_program = match link(
             &(orb_vertex_prefix.to_owned() + include_str!("shaders/orb.vert")),
