@@ -503,16 +503,18 @@ impl State {
     /// Advances the voice orb's fade and smoothed level. `dt` is the frame delta
     /// clamped by the loop, so the 0.2 s fade does not depend on frame rate.
     pub fn update_voice(&mut self, dt: f32) {
-        if self.voice_preview.is_some_and(|start| start.elapsed() >= VOICE_PREVIEW) {
+        if self
+            .voice_preview
+            .is_some_and(|start| start.elapsed() >= VOICE_PREVIEW)
+        {
             self.voice_preview = None;
         }
-        let target =
-            if (self.voice_active || self.voice_preview.is_some()) && self.preferences.voice_orb
-            {
-                1.
-            } else {
-                0.
-            };
+        let target = if (self.voice_active || self.voice_preview.is_some())
+            && self.preferences.voice_orb {
+            1.
+        } else {
+            0.
+        };
         let step = dt / VOICE_FADE;
         if self.voice_fade < target {
             self.voice_fade = (self.voice_fade + step).min(target);
