@@ -2519,7 +2519,7 @@ fn widgets_group_existing_settings_and_restore_each_parent_without_changing_pref
     assert!(
         !controls(&state)
             .iter()
-            .any(|control| control.target == Target::Setting(6))
+            .any(|control| control.target == Target::Setting(100))
     );
     state.direction(Direction::Down, &controls(&state));
     state.direction(Direction::Down, &controls(&state));
