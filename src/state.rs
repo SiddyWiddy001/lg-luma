@@ -509,12 +509,13 @@ impl State {
         {
             self.voice_preview = None;
         }
-        let target = if (self.voice_active || self.voice_preview.is_some())
-            && self.preferences.voice_orb {
-            1.
-        } else {
-            0.
-        };
+        let target =
+            if (self.voice_active || self.voice_preview.is_some()) && self.preferences.voice_orb
+            {
+                1.
+            } else {
+                0.
+            };
         let step = dt / VOICE_FADE;
         if self.voice_fade < target {
             self.voice_fade = (self.voice_fade + step).min(target);
