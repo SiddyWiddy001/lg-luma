@@ -7,23 +7,23 @@ pending because the TV is off.
 
 ## Commits
 
-| Commit | Step |
-| --- | --- |
-| `2a7f807` | 1 — full LTO in the release profile |
-| `d79d31a` | 2 — present pacing: no CPU spin while animating when SDL refuses vsync |
+| Commit    | Step                                                                                             |
+| --------- | ------------------------------------------------------------------------------------------------ |
+| `2a7f807` | 1 — full LTO in the release profile                                                              |
+| `d79d31a` | 2 — present pacing: no CPU spin while animating when SDL refuses vsync                           |
 | `f5fcbf6` | 3 — pre-size wallpapers and oversized icons once (Lanczos3) instead of GPU downscale every frame |
-| `7277e9b` | 4 — cache the nav/header layout, re-measure only when the language changes |
-| `d5c5d65` | 5 — measure tile captions once per compose instead of twice |
-| `64ccc03` | 6 — stop laying out Apps rows that start past the viewport |
-| `1a8d9e8` | 7 — idle backoff: an untouched launcher sleeps up to 1 s between polls |
-| `386ec6e` | step 3 compile fix: keep Lanczos tap weights in float until the fixed-point rounding |
-| `68c632c` | focus glow: one continuous falloff replacing five flat-alpha rings |
-| `e770a07` | eased motion capped to two frame steps, so a wake from idle cannot consume the ramp |
-| `64943f5` | keep the frame loop painting while a card grows, shrinks or flies |
+| `7277e9b` | 4 — cache the nav/header layout, re-measure only when the language changes                       |
+| `d5c5d65` | 5 — measure tile captions once per compose instead of twice                                      |
+| `64ccc03` | 6 — stop laying out Apps rows that start past the viewport                                       |
+| `1a8d9e8` | 7 — idle backoff: an untouched launcher sleeps up to 1 s between polls                           |
+| `386ec6e` | step 3 compile fix: keep Lanczos tap weights in float until the fixed-point rounding             |
+| `68c632c` | focus glow: one continuous falloff replacing five flat-alpha rings                               |
+| `e770a07` | eased motion capped to two frame steps, so a wake from idle cannot consume the ramp              |
+| `64943f5` | keep the frame loop painting while a card grows, shrinks or flies                                |
 | `bfed94c` | dim and tighten the focus bloom (edge alpha `0.49 → 0.42`, falloff `blur * 0.2667 → blur * 0.2`) |
-| `8885467` | glide the scrolling list to a revealed row instead of snapping |
-| `7ecfb1d` | reflow the nineteen lines rustfmt flagged on the previous commits |
-| `a740884` | glide the favourites strip to a revealed card instead of snapping |
+| `8885467` | glide the scrolling list to a revealed row instead of snapping                                   |
+| `7ecfb1d` | reflow the nineteen lines rustfmt flagged on the previous commits                                |
+| `a740884` | glide the favourites strip to a revealed card instead of snapping                                |
 
 Steps 1–7 were meant to be pixel-neutral. `68c632c` deliberately changes the glow, because the
 five stepped rings were what banded.
@@ -104,19 +104,19 @@ old brightness: drop the edge alpha from `0.49` toward `0.42`, or raise `decay` 
 
 ### Fair head-to-head on the TV (Apps grid, 400 forced presentations)
 
-Both binaries run from the *same* app directory with the same assets, preferences and script
+Both binaries run from the _same_ app directory with the same assets, preferences and script
 (`apps,up,up,down,down`), two runs each, so artwork resolution and Luna permissions were identical.
 Verified equal workload: same `--dump-state` (32 apps, Apps page, same focus; only the
 `preferences` block differs, which is a save-time artifact), same glyph counts (125–128) and
 icon meshes (11–12), the alternating 13.05 MB / 13.12 MB artwork figure is the wallpaper cycle,
 not a build difference.
 
-| Metric (mean / p95, ms) | base `glass-ui` | new `optimize` |
-| --- | --- | --- |
-| compose (CPU layout) | 0.80 – 0.83 / 0.95 – 1.11 | **0.59 – 0.65 / 0.74 – 1.01** |
-| CPU submission | 17.97 – 18.09 / 32.3 – 32.7 | 18.01 – 18.07 / 32.5 – 32.8 |
-| Frame pacing | 20.12 – 20.34 / 34.4 – 34.9 | 19.91 – 20.08 / 34.4 – 34.8 |
-| Swap | 1.15 – 1.21 / 1.6 – 1.9 | 1.15 – 1.18 / 1.5 – 1.8 |
+| Metric (mean / p95, ms) | base `glass-ui`             | new `optimize`                |
+| ----------------------- | --------------------------- | ----------------------------- |
+| compose (CPU layout)    | 0.80 – 0.83 / 0.95 – 1.11   | **0.59 – 0.65 / 0.74 – 1.01** |
+| CPU submission          | 17.97 – 18.09 / 32.3 – 32.7 | 18.01 – 18.07 / 32.5 – 32.8   |
+| Frame pacing            | 20.12 – 20.34 / 34.4 – 34.9 | 19.91 – 20.08 / 34.4 – 34.8   |
+| Swap                    | 1.15 – 1.21 / 1.6 – 1.9     | 1.15 – 1.18 / 1.5 – 1.8       |
 
 Frame pacing is ~1 % better and the part the optimisation steps actually target — compose — is
 **~22–26 % cheaper** (0.80 → 0.59 ms mean). CPU submission is unchanged because it is dominated by
@@ -164,7 +164,7 @@ in both builds.
 
 The tile focus eases at a fixed 0.28 factor per frame, but the idle backoff sleeps up to 1 s
 between polls. A focus change that arrives after a long idle woke the loop, and the frame's
-eased interval was measured from the *previous presented frame* — tens of easing steps folded
+eased interval was measured from the _previous presented frame_ — tens of easing steps folded
 into one, so the first frame after the wake landed on the settled value. The interval is now
 clamped to `1/30 s`, so a wake consumes at most two frame steps and the ramp stays visible.
 
@@ -180,7 +180,7 @@ motion. `tile_motion` is now folded into the wake decision.
 comparable: `--screenshot` disables the Ken Burns pan, the clock is fixed, and both runs use
 the same preferences and the same script, which leaves focus on the first card. The card face
 is at a known grid position (`84, 270.4, 270×154.4`), so the measurement averages the
-*difference* in distance rings around that rectangle, masking the face, its rim (the rim
+_difference_ in distance rings around that rectangle, masking the face, its rim (the rim
 strokes were deliberately unchanged) and the caption strip below it, which is text and can
 shift sub-pixel between builds:
 
@@ -203,7 +203,7 @@ jumped to a row below the viewport. `State::scroll` (what is drawn) is now separ
 `State::scroll_target` (where it settles): `reveal_focus` only moves the target and the frame
 loop eases the drawn position toward it with the same smoothing as the pill. Details:
 
-- `reveal_focus` derives the focused control's place in the *unscrolled* list
+- `reveal_focus` derives the focused control's place in the _unscrolled_ list
   (`rect.y + scroll`), so pressing again mid-glide reveals the same row instead of adding the
   offset twice, and a row cannot end up tucked under the header.
 - Changing the list itself — page, section, subpage, filter, search, header-pill focus — goes
@@ -283,7 +283,7 @@ prev = `bfed94c` binary staged as `<app>/luma-prev` and bind-mounted over the re
 
 - **Settled, `--frames 200`: both screenshots byte-identical** (`sha256 9ae17998c7cf…`,
   `shots/ab_settled.png`) and both state dumps report `scroll = 241.760009765625` with the
-  same focus. The glide changes only *how* the list gets there, not where it ends up.
+  same focus. The glide changes only _how_ the list gets there, not where it ends up.
 - **Mid-glide, `--frames 30`: the two screenshots differ** (`shots/abprev.png` settled vs
   `shots/abnew.png` still easing) — proof the intermediate positions really are rendered, and
   proof the bind ran the two different binaries.
@@ -394,18 +394,18 @@ The service's **device table is empty**. `getDevices` returns `{"returnValue":tr
 
 ### Everything tried, with results
 
-| Approach | Result |
-| --- | --- |
-| `voiceinput/startStreaming {"id":"remote1"}` | `fail to find voice device` |
-| startStreaming with 7 IDs (`remote1`, `LGSIC`, `O20 Builtin`, `LGE MR24`, `MRCU`, `mrcu`, `remote`) | all `fail to find voice device` |
-| `setSystemSettings speakToTv=on` | accepted `returnValue: true`, `getActivation` still `activationState:false` |
-| `voiceinput/setting/setActivation` | `Unknown method "setActivation"` |
-| `setting/enable` / `activate` / `start` | all `Unknown method` |
-| `voiceconductor/getVoiceUiEvents` | `{"event":"sessionEnd","subscribed":false}` |
-| `voiceconductor/setInputEvent {"inputType":"wakeword"}` | `returnValue: true`, but opens no stream |
-| `voiceconductor/recordVoice` (app x voiceModel variants) | `precondition not satisfied` |
-| `/dev/uinput` inject key 428 (`RF_VOICE`) | injected OK; RMS 3.61 -> 5.0, max 558 -> 578. No stream. |
-| direct write to `/dev/input/event3` | write succeeded, no trigger |
+| Approach                                                                                            | Result                                                                      |
+| --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `voiceinput/startStreaming {"id":"remote1"}`                                                        | `fail to find voice device`                                                 |
+| startStreaming with 7 IDs (`remote1`, `LGSIC`, `O20 Builtin`, `LGE MR24`, `MRCU`, `mrcu`, `remote`) | all `fail to find voice device`                                             |
+| `setSystemSettings speakToTv=on`                                                                    | accepted `returnValue: true`, `getActivation` still `activationState:false` |
+| `voiceinput/setting/setActivation`                                                                  | `Unknown method "setActivation"`                                            |
+| `setting/enable` / `activate` / `start`                                                             | all `Unknown method`                                                        |
+| `voiceconductor/getVoiceUiEvents`                                                                   | `{"event":"sessionEnd","subscribed":false}`                                 |
+| `voiceconductor/setInputEvent {"inputType":"wakeword"}`                                             | `returnValue: true`, but opens no stream                                    |
+| `voiceconductor/recordVoice` (app x voiceModel variants)                                            | `precondition not satisfied`                                                |
+| `/dev/uinput` inject key 428 (`RF_VOICE`)                                                           | injected OK; RMS 3.61 -> 5.0, max 558 -> 578. No stream.                    |
+| direct write to `/dev/input/event3`                                                                 | write succeeded, no trigger                                                 |
 
 `getActivation` reports `systemStatus:true` but `settingStatus:false`, `activationState:false`,
 `supportPlatform:false` on both the thinQ and amazon branches. There is no Lua API to flip this.
