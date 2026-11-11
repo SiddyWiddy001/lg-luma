@@ -210,12 +210,15 @@ fn parallax_offset_detected_as_damage() {
         Rect::new(0., 0., 1920., 1080.),
         0.,
         false,
-        [0.024, 0.],  // 2.4% parallax offset from focused Apps cell
+        [0.024, 0.], // 2.4% parallax offset from focused Apps cell
     );
     tracker.push(&[wallpaper1]);
     tracker.push(&[wallpaper2]);
     let damage = tracker.damage(1);
-    assert!(damage.is_some(), "parallax offset should be detected as damage");
+    assert!(
+        damage.is_some(),
+        "parallax offset should be detected as damage"
+    );
     let d = damage.unwrap();
     // bounds() returns rect.inset(-1.) -> 1920x1080 becomes 1922x1082
     assert_eq!(d.w, 1922.);
