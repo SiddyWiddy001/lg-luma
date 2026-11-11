@@ -1,4 +1,4 @@
-﻿﻿﻿//! Screen geometry and styling mirror the web UI's 1920×1080 / 16px-rem layout.
+//! Screen geometry and styling mirror the web UI's 1920×1080 / 16px-rem layout.
 use crate::{
     i18n::Language,
     model::{App, BACKGROUNDS, CATEGORIES, Input, InputMode},
