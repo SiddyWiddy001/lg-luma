@@ -538,11 +538,11 @@ impl State {
         }
         if self.parallax != self.parallax_target {
             let mut offset = [0., 0.];
-            for axis in 0..2 {
+            for (axis, offset_axis) in offset.iter_mut().enumerate() {
                 let delta = self.parallax_target[axis] - self.parallax[axis];
-                offset[axis] = self.parallax[axis] + delta * smooth;
-                if (self.parallax_target[axis] - offset[axis]).abs() < 0.0005 {
-                    offset[axis] = self.parallax_target[axis];
+                *offset_axis = self.parallax[axis] + delta * smooth;
+                if (self.parallax_target[axis] - *offset_axis).abs() < 0.0005 {
+                    *offset_axis = self.parallax_target[axis];
                 }
             }
             self.parallax = offset;
