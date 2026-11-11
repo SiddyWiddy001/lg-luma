@@ -68,6 +68,9 @@ if [ ! -d "$STATE" ]; then mkdir -m 755 "$STATE" || exit 1; fi
 if [ "$COMMAND" = boot ]; then
   (
     printf 'boot up=%s\n' "$(cut -d. -f1 /proc/uptime)"
+    # Early bind-mount: do this FIRST, before luma-helper initializes.
+    # Idempotent: if already mounted, mount --bind succeeds silently.
+    mount --bind /media/developer/apps/usr/palm/applications/com.ecklf.luma/luma /usr/bin/com.webos.app.home 2>/dev/null || true
     # Mount and launch Home now instead of waiting for the preload manager's later
     # launch; that launch stays the fallback if this one is refused.
     [ -x "$SCRIPT_DIR/luma-helper" ] && exec "$SCRIPT_DIR/luma-helper" home boot "$SCRIPT_DIR"
