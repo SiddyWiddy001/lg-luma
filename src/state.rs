@@ -524,7 +524,7 @@ impl State {
             None
         };
         let target = match index {
-            Some(index) if index != self.parallax_index => {
+            Some(index) if Some(index) != self.parallax_index => {
                 // 6-column grid: map column/row to a subtle ±2.4% UV offset.
                 let column = (index % APPS_COLUMNS) as f32;
                 let columns = APPS_COLUMNS as f32;
