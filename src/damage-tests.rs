@@ -194,3 +194,30 @@ fn an_unchanged_frame_names_a_pixel_inside_the_drawable() {
         );
     }
 }
+
+#[test]
+fn parallax_offset_detected_as_damage() {
+    let mut tracker = Tracker::default();
+    let wallpaper1 = Draw::Image(
+        "wallpapers/dunes.jpg".into(),
+        Rect::new(0., 0., 1920., 1080.),
+        0.,
+        false,
+        [0., 0.],
+    );
+    let wallpaper2 = Draw::Image(
+        "wallpapers/dunes.jpg".into(),
+        Rect::new(0., 0., 1920., 1080.),
+        0.,
+        false,
+        [0.024, 0.],  // 2.4% parallax offset from focused Apps cell
+    );
+    tracker.push(&[wallpaper1]);
+    tracker.push(&[wallpaper2]);
+    let damage = tracker.damage(1);
+    assert!(damage.is_some(), "parallax offset should be detected as damage");
+    let d = damage.unwrap();
+    // bounds() returns rect.inset(-1.) -> 1920x1080 becomes 1922x1082
+    assert_eq!(d.w, 1922.);
+    assert_eq!(d.h, 1082.);
+}
