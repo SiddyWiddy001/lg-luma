@@ -1,4 +1,4 @@
-//! Screen geometry and styling mirror the web UI's 1920×1080 / 16px-rem layout.
+﻿﻿﻿//! Screen geometry and styling mirror the web UI's 1920×1080 / 16px-rem layout.
 use crate::{
     i18n::Language,
     model::{App, BACKGROUNDS, CATEGORIES, Input, InputMode},
@@ -226,7 +226,9 @@ impl Scene {
         self.draw
             .push(Draw::Text(text.into(), rect, style, color, center));
     }
-    fn image(\n        &mut self,\n        path: String,\n        rect: Rect,\n        radius: f32,\n        contain: bool,\n        parallax: [f32; 2],\n    ) {\n        self.draw\n            .push(Draw::Image(path, rect, radius, contain, parallax));\n    }
+    fn image(&mut self, path: String, rect: Rect, radius: f32, contain: bool, parallax: [f32; 2]) {
+        self.draw.push(Draw::Image(path, rect, radius, contain, parallax));
+    }
     fn icon(&mut self, assets: &Assets, name: &str, rect: Rect, color: Color) {
         self.draw.push(Draw::TintedImage(
             assets.path(format!("ui-icons/{name}.lvec")),
