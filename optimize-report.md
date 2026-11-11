@@ -461,30 +461,31 @@ stays parked rather than improvised in code.
 ## 2026-11-11 - Early Home mount investigation: read-only squashfs blocks upstart override
 
 ### Goal
+
 Reduce the ~25 s delay where stock LG Home shows before Luma takes over. The boot log (/var/lib/luma-home/boot.log) showed the webosbrew init.d hook (64-luma-home -> home.sh boot -> luma-helper home boot) fires at up~37, then mount at up=38, Luma launch at up=38. We wanted the mount to happen at up~10-15 so that when bootd launches com.webos.app.home at its natural firstAppInHome time (up~18), the binary is already Luma.
 
 ### Investigation summary (read-only, no writes until final decision)
 
-| Finding | Evidence |
-|---------|----------|
-| Root cause | The cold-boot hook is /var/lib/webosbrew/init.d/64-luma-home (symlink -> /var/lib/luma-home/home.sh), invoked by webosbrew's startup.sh at up~37. The mount is the first action inside luma-helper home boot. |
-| Bootd launches first app | bootd.conf:5 -> start on (stopped mount-readwrite or mount-readwrite-done). com.webos.app.home is launched by bootd at firstAppInHome time (~up=18). |
-| Mount-readwrite job | /etc/init/mount-readwrite.conf starts on snapshot-resume-done, emits mount-readwrite-done at line 584 (end of script). This is strictly before bootd's stopped mount-readwrite. |
-| Earliest safe injection | start on mount-readwrite-done - guaranteed after /media is mounted and before bootd launches first app. |
-| Upstart job path | /etc/init/*.conf - read-only overlay, no upperdir (mount shows overlay on /etc type overlay ro,lowerdir=/overlay/bsppart/bsp/etc:/etc). Kernel cmdline: root=... ro rootfstype=squashfs. |
-| Systemd path | /etc/systemd/system/ - same read-only overlay. |
-| mount-readwrite.d bind.fstab | Directory doesn't exist, cannot create (mkdir -p -> Read-only file system). |
-| luma-helper mount needs | Only /bin/mount + luna-send (for blockSystemApp after mount). The mount itself needs no Luna bus. |
+| Finding                      | Evidence                                                                                                                                                                                                      |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Root cause                   | The cold-boot hook is /var/lib/webosbrew/init.d/64-luma-home (symlink -> /var/lib/luma-home/home.sh), invoked by webosbrew's startup.sh at up~37. The mount is the first action inside luma-helper home boot. |
+| Bootd launches first app     | bootd.conf:5 -> start on (stopped mount-readwrite or mount-readwrite-done). com.webos.app.home is launched by bootd at firstAppInHome time (~up=18).                                                          |
+| Mount-readwrite job          | /etc/init/mount-readwrite.conf starts on snapshot-resume-done, emits mount-readwrite-done at line 584 (end of script). This is strictly before bootd's stopped mount-readwrite.                               |
+| Earliest safe injection      | start on mount-readwrite-done - guaranteed after /media is mounted and before bootd launches first app.                                                                                                       |
+| Upstart job path             | /etc/init/*.conf - read-only overlay, no upperdir (mount shows overlay on /etc type overlay ro,lowerdir=/overlay/bsppart/bsp/etc:/etc). Kernel cmdline: root=... ro rootfstype=squashfs.                      |
+| Systemd path                 | /etc/systemd/system/ - same read-only overlay.                                                                                                                                                                |
+| mount-readwrite.d bind.fstab | Directory doesn't exist, cannot create (mkdir -p -> Read-only file system).                                                                                                                                   |
+| luma-helper mount needs      | Only /bin/mount + luna-send (for blockSystemApp after mount). The mount itself needs no Luna bus.                                                                                                             |
 
 ### Options evaluated
 
-| Approach | Runs at | Feasibility |
-|----------|---------|-------------|
-| New upstart job in /etc/init/luma-early-mount.conf | mount-readwrite-done | Impossible - /etc/init is read-only overlay with no upperdir. Requires initramfs rebuild with upperdir= and workdir= added to kernel cmdline. |
-| Systemd service | After=mount-readwrite.service | Impossible - /etc/systemd read-only overlay. |
-| Bind.fstab in /etc/init/mount-readwrite.d/ | mount-readwrite-done | Impossible - directory doesn't exist, can't create. |
-| Optimize existing hook | minimal-boot-done (up~37) | Works - move mount to top of home.sh before luma-helper init. |
-| Optimize startup.sh ordering | minimal-boot-done (up~37) | Possible - move run-parts earlier in startup.sh, but riskier. |
+| Approach                                           | Runs at                       | Feasibility                                                                                                                                   |
+| -------------------------------------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| New upstart job in /etc/init/luma-early-mount.conf | mount-readwrite-done          | Impossible - /etc/init is read-only overlay with no upperdir. Requires initramfs rebuild with upperdir= and workdir= added to kernel cmdline. |
+| Systemd service                                    | After=mount-readwrite.service | Impossible - /etc/systemd read-only overlay.                                                                                                  |
+| Bind.fstab in /etc/init/mount-readwrite.d/         | mount-readwrite-done          | Impossible - directory doesn't exist, can't create.                                                                                           |
+| Optimize existing hook                             | minimal-boot-done (up~37)     | Works - move mount to top of home.sh before luma-helper init.                                                                                 |
+| Optimize startup.sh ordering                       | minimal-boot-done (up~37)     | Possible - move run-parts earlier in startup.sh, but riskier.                                                                                 |
 
 ### Decision
 
@@ -492,28 +493,35 @@ Abandoned the early upstart job - impossible without initramfs rebuild (high ris
 
 Implemented: Option A - early mount in home.sh boot path (commit 1a98ca5):
 `sh
+
 # Early bind-mount: do this FIRST, before luma-helper initializes.
+
 # Idempotent: if already mounted, mount --bind succeeds silently.
+
 mount --bind /media/developer/apps/usr/palm/applications/com.ecklf.luma/luma /usr/bin/com.webos.app.home 2>/dev/null || true
 `
 This runs at the top of the boot branch in home.sh, before luma-helper initializes. It shaves the ~1-2 s that luma-helper spends initializing before the mount. The mount is idempotent (safe to run twice), errors are suppressed (|| true), and it cannot delay boot.
 
 ### Expected impact
+
 - Mount now happens ~1-2 s earlier in the hook (still at up~37, not up~18).
 - Does not beat bootd's first-app launch at up~18.
 - The ~25 s "stock Home visible" delay is fundamentally caused by webosbrew's startup.sh running at minimal-boot-done (up~37). This optimization shaves the luma-helper init overhead (~1-2 s).
 - No risk of double-launch: the late hook still runs but finds the mount already active (luma-helper home status reports "mounted":true).
 
 ### Rollback
+
 `sh
 git revert 1a98ca5 && git push origin optimize
 `
 Or on TV: umount /usr/bin/com.webos.app.home (mount is re-applied by 64-luma-home on next boot).
 
 ### Documented for future attempts
+
 If a future maintainer wants the true early mount (up~10-15), the only path is:
+
 1. Extract initramfs (/boot/Image.lz4)
 2. Modify init scripts to add upperdir=/mnt/lg/appstore/overlay/etc,workdir=/mnt/lg/appstore/overlay/work to the /etc overlay mount
 3. Repack initramfs
 4. Flash via recovery mode
-This is high-risk (brick potential) and requires signed artifacts. Documented here so we never chase this rabbit hole again.
+   This is high-risk (brick potential) and requires signed artifacts. Documented here so we never chase this rabbit hole again.

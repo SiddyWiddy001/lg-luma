@@ -269,12 +269,12 @@ changes the focus glow to fix banding (see [Glass UI](#glass-ui)).
 Measured on an LG C1 (webOS 6, `OLED48C1KNB`) with `--profile-frames` over 400 forced Apps
 presentations, base `glass-ui` versus `optimize` (mean / p95, ms):
 
-| Metric | base `glass-ui` | `optimize` |
-| --- | --- | --- |
-| compose (CPU layout) | 0.80 – 0.83 / 0.95 – 1.11 | 0.59 – 0.65 / 0.74 – 1.01 |
-| CPU submission | 17.97 – 18.09 / 32.3 – 32.7 | 18.01 – 18.07 / 32.5 – 32.8 |
-| Frame pacing | 20.12 – 20.34 / 34.4 – 34.9 | 19.91 – 20.08 / 34.4 – 34.8 |
-| Swap | 1.15 – 1.21 / 1.6 – 1.9 | 1.15 – 1.18 / 1.5 – 1.8 |
+| Metric               | base `glass-ui`             | `optimize`                  |
+| -------------------- | --------------------------- | --------------------------- |
+| compose (CPU layout) | 0.80 – 0.83 / 0.95 – 1.11   | 0.59 – 0.65 / 0.74 – 1.01   |
+| CPU submission       | 17.97 – 18.09 / 32.3 – 32.7 | 18.01 – 18.07 / 32.5 – 32.8 |
+| Frame pacing         | 20.12 – 20.34 / 34.4 – 34.9 | 19.91 – 20.08 / 34.4 – 34.8 |
+| Swap                 | 1.15 – 1.21 / 1.6 – 1.9     | 1.15 – 1.18 / 1.5 – 1.8     |
 
 Compose (the CPU layout pass the steps target) is ~22–26 % cheaper; CPU submission is unchanged
 because it is dominated by the GL submission path; frame pacing improves ~1 %. The Apps page runs
@@ -464,14 +464,14 @@ Shader pipeline (all GLES2):
 The six boot scripts live in the parent `luma/` directory (not `src-repo/`). They enable, verify,
 and inspect the Home takeover and the boot-logo wallpaper staging.
 
-| Script | Purpose | Key actions |
-| --- | --- | --- |
-| `pre_takeover.sh` | Pre-flight before enabling takeover | Launches Luma to verify it opens; `pgrep` for the process; `autostart.sh disable` as a safety step; lists `/var/lib/webosbrew/init.d/`; searches for LG Input Hook across app/service directories and prefs; checks for a running `inputhook`. |
-| `enable_takeover.sh` | Enables the webOS 6 takeover path | `printf 'y\n' \| sh "$APP/home.sh" enable`; prints status; greps `/proc/mounts` for the `/usr/bin/com.webos.app.home` bind mount; lists the `64-luma-home` cold-boot hook; `pgrep` for Luma. |
-| `verify_takeover.sh` | Post-enable verification | `ps -ef` for Luma/Home; `ls -l /usr/bin/com.webos.app.home`; `grep com.webos.app.home /proc/self/mountinfo`; lists `/var/lib/luma-home/`; tails `boot.log`; runs `home.sh status`. |
-| `boot_apply.sh` | Stages a boot-logo wallpaper with rotation off, then restarts Home | Kills `com.webos.app.home`; copies patched `preferences.json` **after** the kill (so a SIGTERM flush cannot restore the old background); relaunches Home via `luna-send`; verifies the prefs and wallpaper entries. |
-| `boot_wallpaper.sh` | Stages the Luma boot logo as a custom wallpaper entry | Creates `wallpapers/<custom-id>` (32-hex id) and `metadata.json`; expects regular (non-symlink) `wallpaper.jpg`/`thumbnail.jpg` under 12 MiB; prints hashes. |
-| `luma_state.sh` | Inspects Luma's foreground/lifecycle state | Backs up `preferences.json`; `getForegroundAppInfo`; `getAppLifeStatus` for `com.ecklf.luma` and `com.webos.app.home`; `ps -ef` for both. |
+| Script               | Purpose                                                            | Key actions                                                                                                                                                                                                                                    |
+| -------------------- | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pre_takeover.sh`    | Pre-flight before enabling takeover                                | Launches Luma to verify it opens; `pgrep` for the process; `autostart.sh disable` as a safety step; lists `/var/lib/webosbrew/init.d/`; searches for LG Input Hook across app/service directories and prefs; checks for a running `inputhook`. |
+| `enable_takeover.sh` | Enables the webOS 6 takeover path                                  | `printf 'y\n' \| sh "$APP/home.sh" enable`; prints status; greps `/proc/mounts` for the `/usr/bin/com.webos.app.home` bind mount; lists the `64-luma-home` cold-boot hook; `pgrep` for Luma.                                                   |
+| `verify_takeover.sh` | Post-enable verification                                           | `ps -ef` for Luma/Home; `ls -l /usr/bin/com.webos.app.home`; `grep com.webos.app.home /proc/self/mountinfo`; lists `/var/lib/luma-home/`; tails `boot.log`; runs `home.sh status`.                                                             |
+| `boot_apply.sh`      | Stages a boot-logo wallpaper with rotation off, then restarts Home | Kills `com.webos.app.home`; copies patched `preferences.json` **after** the kill (so a SIGTERM flush cannot restore the old background); relaunches Home via `luna-send`; verifies the prefs and wallpaper entries.                            |
+| `boot_wallpaper.sh`  | Stages the Luma boot logo as a custom wallpaper entry              | Creates `wallpapers/<custom-id>` (32-hex id) and `metadata.json`; expects regular (non-symlink) `wallpaper.jpg`/`thumbnail.jpg` under 12 MiB; prints hashes.                                                                                   |
+| `luma_state.sh`      | Inspects Luma's foreground/lifecycle state                         | Backs up `preferences.json`; `getForegroundAppInfo`; `getAppLifeStatus` for `com.ecklf.luma` and `com.webos.app.home`; `ps -ef` for both.                                                                                                      |
 
 ### Home lifecycle
 
