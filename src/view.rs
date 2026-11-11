@@ -227,7 +227,8 @@ impl Scene {
             .push(Draw::Text(text.into(), rect, style, color, center));
     }
     fn image(&mut self, path: String, rect: Rect, radius: f32, contain: bool, parallax: [f32; 2]) {
-        self.draw.push(Draw::Image(path, rect, radius, contain, parallax));
+        self.draw
+            .push(Draw::Image(path, rect, radius, contain, parallax));
     }
     fn icon(&mut self, assets: &Assets, name: &str, rect: Rect, color: Color) {
         self.draw.push(Draw::TintedImage(
