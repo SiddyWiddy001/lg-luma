@@ -1,4 +1,4 @@
-# Luma Custom (SiddyOS)
+﻿# Luma Custom (SiddyOS)
 
 A highly optimized, deeply modified fork of Luma for the LG C1 (webOS 6).
 
@@ -25,43 +25,43 @@ All code changes were applied via the Engineer's native editor, never via shell 
 ```mermaid
 flowchart TD
     %% Entry & State
-    A[main.rs:main()] --> B[platform.rs: SDL2 init]
-    B --> C[state.rs: State::new()]
-    C --> D[renderer.rs: Renderer::new()]
+    A["main.rs:main()"] --> B["platform.rs: SDL2 init"]
+    B --> C["state.rs: State::new()"]
+    C --> D["renderer.rs: Renderer::new()"]
 
     %% Frame Loop
-    D --> E[main.rs: event loop]
+    D --> E["main.rs: event loop"]
     E --> F{Input?}
-    F -->|Remote/Pointer| G[sdl_events.rs: handle]
-    G --> H[state.rs: State::handle_input]
-    H --> I[state.rs: update(dt)]
-    I --> J[state.rs: update_parallax]
-    J --> K[view.rs: Scene::compose]
-    K --> L[renderer.rs: Renderer::render]
+    F -->|Remote/Pointer| G["sdl_events.rs: handle"]
+    G --> H["state.rs: State::handle_input"]
+    H --> I["state.rs: update(dt)"]
+    I --> J["state.rs: update_parallax"]
+    J --> K["view.rs: Scene::compose"]
+    K --> L["renderer.rs: Renderer::render"]
 
     %% Shaders
-    L --> M[paint.vert / paint.frag]
-    M --> N[Parallax UV offset]
-    N --> O[Glass distance field]
-    O --> P[Glow distance field]
-    P --> Q[Orb SDF circle]
+    L --> M["paint.vert / paint.frag"]
+    M --> N["Parallax UV offset"]
+    N --> O["Glass distance field"]
+    O --> P["Glow distance field"]
+    P --> Q["Orb SDF circle"]
     Q --> R[Swap buffers]
 
     %% Sub-systems
-    K --> S[recents.rs]
-    K --> T[wallpapers.rs]
-    K --> U[voice.rs]
-    S --> V[recents-view.rs]
-    V --> W[scroll-preview.rs]
-    U --> X[orb.vert / orb.frag]
+    K --> S["recents.rs"]
+    K --> T["wallpapers.rs"]
+    K --> U["voice.rs"]
+    S --> V["recents-view.rs"]
+    V --> W["scroll-preview.rs"]
+    U --> X["orb.vert / orb.frag"]
 
     %% Persistence
-    C --> Y[storage.rs: Preferences JSON]
-    C --> Z[webhook.rs: QR upload]
+    C --> Y["storage.rs: Preferences JSON"]
+    C --> Z["webhook.rs: QR upload"]
 
     %% Damage Tracking
-    L --> AA[damage.rs: Tracker]
-    AA --> AB[Partial redraw]
+    L --> AA["damage.rs: Tracker"]
+    AA --> AB["Partial redraw"]
 
     style A fill:#1f77b4,color:#fff
     style L fill:#ff7f0e,color:#fff
