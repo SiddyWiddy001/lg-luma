@@ -88,7 +88,7 @@ pub enum Draw {
     /// seconds. Drawn last with additive blending, over every other command.
     Orb(Rect, f32, f32, f32),
     Text(String, Rect, TextStyle, Color, bool),
-    Image(String, Rect, f32, bool),
+    Image(String, Rect, f32, bool, [f32; 2]),
     TintedImage(String, Rect, f32, bool, Color),
     /// Installed icon and its backdrop, composited before opacity and edge fading.
     /// The glass plate paints the icon alone over its own gradient (`AppIcon`), so this
@@ -332,6 +332,7 @@ struct PaintUniforms {
     app_top: GLint,
     app_bottom: GLint,
     glass: GLint,
+    parallax: GLint,
 }
 struct MeshUniforms {
     edge_fade: GLint,
@@ -388,7 +389,7 @@ fn full_screen_paint(command: &Draw) -> bool {
 /// An opaque, untinted, square full-screen image: the wallpaper that scrims can fold into.
 fn plain_wallpaper(command: &Draw) -> Option<(&str, Rect)> {
     match command {
-        Draw::Image(path, rect, radius, false) if full_screen(rect) && *radius <= 0. => {
+        Draw::Image(path, rect, radius, false, _) if full_screen(rect) && *radius <= 0. => {
             Some((path.as_str(), *rect))
         }
         Draw::TintedImage(path, rect, radius, false, tint)
@@ -714,6 +715,7 @@ impl Renderer {
                 app_top: uniform(program, c"u_app_top"),
                 app_bottom: uniform(program, c"u_app_bottom"),
                 glass: uniform(program, c"u_glass"),
+                parallax: uniform(program, c"u_parallax_offset"),
             },
             vector: MeshUniforms {
                 edge_fade: uniform(vector_program, c"u_edge_fade"),
@@ -1972,7 +1974,7 @@ impl Renderer {
                 Draw::Text(text, rect, size, color, centered) => {
                     self.text(text, *rect, *size, *color, *centered)
                 }
-                Draw::Image(path, rect, radius, contain) => {
+                Draw::Image(path, rect, radius, contain, _parallax) => {
                     self.image(path, *rect, *radius, *contain, [1.; 4])
                 }
                 Draw::TintedImage(path, rect, radius, contain, tint) => {
@@ -2000,7 +2002,7 @@ impl Renderer {
     /// Draws the scene. With `damage` (drawable pixels from `damage_pixels`), only those pixels
     /// are cleared and drawn; commands entirely outside them are skipped, and the rest of the
     /// back buffer keeps its earlier contents.
-    pub fn render(&mut self, commands: &[Draw], width: u32, height: u32, damage: Option<[i32; 4]>) {
+    pub fn render(&mut self, commands: &[Draw], width: u32, height: u32, damage: Option<[i32; 4]>, parallax: [f32; 2]) {
         let area = damage.map(|pixels| Self::damage_area(pixels, width, height));
         let started = Instant::now();
         self.build(commands, width, height, area);
@@ -2095,11 +2097,13 @@ impl Renderer {
                 + self.logo_vertices.len())
                 * size_of::<f32>();
             let setup_started = Instant::now();
+            let (state_parallax_x, state_parallax_y) = (parallax[0], parallax[1]);
             gl::UseProgram(self.program);
             // One drawable pixel in logical units: the paint shader's edge filter width.
             gl::Uniform1f(self.uniforms.paint.aa, 1. / scale.max(0.01));
             gl::Uniform1i(self.uniforms.paint.texture, 0);
             gl::ActiveTexture(gl::TEXTURE0);
+            gl::Uniform2f(self.uniforms.paint.parallax, state_parallax_x, state_parallax_y);
             setup_ms = setup_started.elapsed().as_secs_f64() * 1000.;
             let draw_started = Instant::now();
             let mut paint_bound = false;
@@ -2478,7 +2482,7 @@ impl Renderer {
                 return Err("Screenshot framebuffer is incomplete".into());
             }
         }
-        self.render(commands, size.width, size.height, None);
+        self.render(commands, size.width, size.height, None, [0., 0.]);
         let stats = self.stats.clone();
         let result = self.screenshot(path, size.width, size.height);
         unsafe {
@@ -2538,7 +2542,7 @@ impl Renderer {
             }
             gl::BindFramebuffer(gl::FRAMEBUFFER, framebuffers[0]);
         }
-        self.render(commands, width, height, None);
+        self.render(commands, width, height, None, [0., 0.]);
         unsafe {
             gl::BindFramebuffer(gl::READ_FRAMEBUFFER, framebuffers[0]);
             gl::BindFramebuffer(gl::DRAW_FRAMEBUFFER, framebuffers[1]);

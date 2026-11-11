@@ -284,6 +284,13 @@ pub struct State {
     /// The app whose icon is zooming out on launch, if one started this frame. The frame
     /// loop keeps the scene dirty while it animates and clears it when the fade finishes.
     pub launch_zoom: Option<LaunchZoom>,
+    /// Parallax wallpaper offset in UV units, eased toward `parallax_target`.
+    /// Apps grid only; the Home favourites strip keeps [0., 0.].
+    pub parallax: [f32; 2],
+    /// Where the focused app grid cell wants the wallpaper to sit.
+    pub parallax_target: [f32; 2],
+    /// Grid index the last offset was computed from, so a repeat focus is a no-op.
+    pub parallax_index: Option<usize>,
     /// The remote's voice key is held (best effort; see `voice`).
     pub voice_active: bool,
     /// 0..1 fade for the voice orb, advanced by the frame loop over ~0.2 s.
@@ -343,6 +350,9 @@ impl State {
             app_lift: HashMap::new(),
             press_depth: 0.,
             launch_zoom: None,
+            parallax: [0., 0.],
+            parallax_target: [0., 0.],
+            parallax_index: None,
             voice_active: false,
             voice_fade: 0.,
             voice_level: 0.,
@@ -493,11 +503,55 @@ impl State {
             || self.voice_active
             || self.voice_preview.is_some()
             || self.voice_fade > 0.
+            || self.parallax != self.parallax_target
             || (!self.preferences.reduced_motion
                 && self
                     .notice
                     .as_ref()
                     .is_some_and(|(_, start)| start.elapsed() < Duration::from_millis(120)))
+    }
+
+    /// Eases the wallpaper parallax toward the focused Apps-grid cell. Only runs on the
+    /// Apps page; Home favourites are a 1-D strip and keep the wallpaper still. Once
+    /// the offset settles it stops requesting frames, so the idle backoff resumes.
+    pub fn update_parallax(&mut self, dt: f32, smooth: f32) {
+        let index = if self.page == Page::Apps {
+            match &self.focus {
+                Target::App(id) => self.apps().iter().position(|app| &app.id == id),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        let target = match index {
+            Some(index) if index != self.parallax_index => {
+                // 6-column grid: map column/row to a subtle ±2.4% UV offset.
+                let column = (index % APPS_COLUMNS) as f32;
+                let columns = APPS_COLUMNS as f32;
+                [
+                    (column / (columns - 1.) * 2. - 1.) * 0.024,
+                    0.,
+                ]
+            }
+            _ => [0., 0.],
+        };
+        if target != [0., 0.] {
+            self.parallax_target = target;
+            self.parallax_index = index;
+        }
+        if self.parallax != self.parallax_target {
+            let mut offset = [0., 0.];
+            for axis in 0..2 {
+                let delta = self.parallax_target[axis] - self.parallax[axis];
+                offset[axis] = self.parallax[axis] + delta * smooth;
+                if (self.parallax_target[axis] - offset[axis]).abs() < 0.0005 {
+                    offset[axis] = self.parallax_target[axis];
+                }
+            }
+            self.parallax = offset;
+            self.dirty = true;
+        }
+        let _ = dt;
     }
 
     /// Advances the voice orb's fade and smoothed level. `dt` is the frame delta

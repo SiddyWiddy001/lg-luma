@@ -226,8 +226,8 @@ impl Scene {
         self.draw
             .push(Draw::Text(text.into(), rect, style, color, center));
     }
-    fn image(&mut self, path: String, rect: Rect, radius: f32, contain: bool) {
-        self.draw.push(Draw::Image(path, rect, radius, contain));
+    fn image(&mut self, path: String, rect: Rect, radius: f32, contain: bool, parallax: [f32; 2]) {
+        self.draw.push(Draw::Image(path, rect, radius, contain, parallax));
     }
     fn icon(&mut self, assets: &Assets, name: &str, rect: Rect, color: Color) {
         self.draw.push(Draw::TintedImage(
@@ -352,7 +352,7 @@ impl Scene {
                     glass.inner *= dim;
                     glass.reflection *= dim;
                 }
-                Draw::Image(path, rect, radius, contain) => {
+                Draw::Image(path, rect, radius, contain, _) => {
                     *draw = Draw::TintedImage(
                         path.clone(),
                         *rect,
@@ -602,7 +602,7 @@ pub fn scene_with_pill(
     let mut out = Scene::new();
     let wallpaper = wallpaper_rect(state, now);
     if let Some((previous, start)) = &state.previous_background {
-        out.image(assets.background(state, previous), wallpaper, 0., false);
+        out.image(assets.background(state, previous), wallpaper, 0., false, [0., 0.]);
         let alpha = (start.elapsed().as_secs_f32() / state.background_fade).min(1.);
         out.draw.push(Draw::TintedImage(
             assets.background(state, &state.preferences.background),
@@ -617,6 +617,7 @@ pub fn scene_with_pill(
             wallpaper,
             0.,
             false,
+            state.parallax,
         );
     }
     let content_start = out.draw.len();
@@ -1185,6 +1186,7 @@ fn app_face(
             ),
             0.,
             true,
+            [0., 0.],
         );
     } else if !installed {
         brand_mark(out, assets, app, rect, language);
@@ -2826,6 +2828,7 @@ fn settings_content(out: &mut Scene, state: &State, assets: &Assets) {
                     rect,
                     16.,
                     false,
+                    [0., 0.],
                 );
                 out.border(rect, 16., 1., c(0xffffff, 0.086));
                 if state.preferences.background == id {
@@ -3522,7 +3525,7 @@ fn options(out: &mut Scene, state: &State, assets: &Assets, id: &str, anchor: Op
                 || assets.path(format!("thumbnails/{id}.jpg")),
                 |item| item.thumbnail(),
             );
-        out.image(path, card, 16., false);
+        out.image(path, card, 16., false, [0., 0.]);
         out.border(card, 16., 1., c(0xffffff, 0.086));
     } else if let Some(app) = app.filter(|_| !shortcut) {
         let favorite_color = app_face(out, assets, app, card, language, squircle(card), 0.);

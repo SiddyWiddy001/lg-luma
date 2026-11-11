@@ -1766,6 +1766,7 @@ fn run() -> Result<(), String> {
         // glide; 1/30 s also covers a genuinely slow frame without stalling the ramp.
         let ease = last_frame.elapsed().as_secs_f32().min(1. / 30.);
         last_frame = Instant::now();
+        state.update_parallax(ease, 1. - (-20. * ease).exp());
         state.update_voice(ease);
         if state.preferences.language != navigation_language {
             navigation_language = state.preferences.language;
@@ -1915,7 +1916,7 @@ fn run() -> Result<(), String> {
                     }
                     damage
                 });
-                renderer.render(&scene.draw, width, height, damage);
+                renderer.render(&scene.draw, width, height, damage, state.parallax);
                 redrawn_total += renderer.stats().redrawn_fraction;
                 if verify_damage {
                     // Full frames give the baseline difference of the two drawing paths.

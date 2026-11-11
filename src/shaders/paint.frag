@@ -7,6 +7,7 @@ uniform vec3 u_app_bottom;
 uniform bool u_app;
 uniform float u_icon_tint;
 uniform vec4 u_glass;
+uniform vec2 u_parallax_offset;
 varying PAINT_PRECISION vec2 v_uv;
 varying PAINT_PRECISION vec4 v_color;
 varying PAINT_PRECISION vec4 v_shape;
@@ -31,7 +32,10 @@ vec4 over(vec4 fg, vec4 bg) {
 }
 void main() {
     if (v_params.x < 0.0) {
-        vec4 color = texture2D(u_texture, v_uv) * v_color;
+        // Parallax: scale the sample window to 1.05 so the offset never reaches the
+        // clamped texture edge, then shift by the eased offset (2.4% of width max).
+        vec2 parallax_uv = (v_uv - 0.5) * (1.0 / 1.05) + 0.5 + u_parallax_offset;
+        vec4 color = texture2D(u_texture, parallax_uv) * v_color;
         // -2: wallpaper with folded full-screen fills, p * m + k (k in v_shape).
         if (v_params.x < -1.5)
             color.rgb += v_shape.rgb;

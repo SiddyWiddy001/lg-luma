@@ -135,8 +135,8 @@ fn same(a: &Draw, b: &Draw) -> bool {
                 && c1 == c2
                 && x1 == x2
         }
-        (Draw::Image(p1, r1, a1, c1), Draw::Image(p2, r2, a2, c2)) => {
-            p1 == p2 && rect(r1, r2) && a1 == a2 && c1 == c2
+        (Draw::Image(p1, r1, a1, c1, x1), Draw::Image(p2, r2, a2, c2, x2)) => {
+            p1 == p2 && rect(r1, r2) && a1 == a2 && c1 == c2 && x1 == x2
         }
         (Draw::TintedImage(p1, r1, a1, c1, t1), Draw::TintedImage(p2, r2, a2, c2, t2)) => {
             p1 == p2 && rect(r1, r2) && a1 == a2 && c1 == c2 && t1 == t2
