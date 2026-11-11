@@ -528,10 +528,7 @@ impl State {
                 // 6-column grid: map column/row to a subtle ±2.4% UV offset.
                 let column = (index % APPS_COLUMNS) as f32;
                 let columns = APPS_COLUMNS as f32;
-                [
-                    (column / (columns - 1.) * 2. - 1.) * 0.024,
-                    0.,
-                ]
+                [(column / (columns - 1.) * 2. - 1.) * 0.024, 0.]
             }
             _ => [0., 0.],
         };

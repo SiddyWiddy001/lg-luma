@@ -2002,7 +2002,14 @@ impl Renderer {
     /// Draws the scene. With `damage` (drawable pixels from `damage_pixels`), only those pixels
     /// are cleared and drawn; commands entirely outside them are skipped, and the rest of the
     /// back buffer keeps its earlier contents.
-    pub fn render(&mut self, commands: &[Draw], width: u32, height: u32, damage: Option<[i32; 4]>, parallax: [f32; 2]) {
+    pub fn render(
+        &mut self,
+        commands: &[Draw],
+        width: u32,
+        height: u32,
+        damage: Option<[i32; 4]>,
+        parallax: [f32; 2],
+    ) {
         let area = damage.map(|pixels| Self::damage_area(pixels, width, height));
         let started = Instant::now();
         self.build(commands, width, height, area);
@@ -2103,7 +2110,11 @@ impl Renderer {
             gl::Uniform1f(self.uniforms.paint.aa, 1. / scale.max(0.01));
             gl::Uniform1i(self.uniforms.paint.texture, 0);
             gl::ActiveTexture(gl::TEXTURE0);
-            gl::Uniform2f(self.uniforms.paint.parallax, state_parallax_x, state_parallax_y);
+            gl::Uniform2f(
+                self.uniforms.paint.parallax,
+                state_parallax_x,
+                state_parallax_y,
+            );
             setup_ms = setup_started.elapsed().as_secs_f64() * 1000.;
             let draw_started = Instant::now();
             let mut paint_bound = false;

@@ -226,7 +226,14 @@ impl Scene {
         self.draw
             .push(Draw::Text(text.into(), rect, style, color, center));
     }
-    fn image(&mut self, path: String, rect: Rect, radius: f32, contain: bool, parallax: [f32; 2]) {
+    fn image(
+        &mut self,
+        path: String,
+        rect: Rect,
+        radius: f32,
+        contain: bool,
+        parallax: [f32; 2],
+    ) {
         self.draw.push(Draw::Image(path, rect, radius, contain, parallax));
     }
     fn icon(&mut self, assets: &Assets, name: &str, rect: Rect, color: Color) {
@@ -602,7 +609,13 @@ pub fn scene_with_pill(
     let mut out = Scene::new();
     let wallpaper = wallpaper_rect(state, now);
     if let Some((previous, start)) = &state.previous_background {
-        out.image(assets.background(state, previous), wallpaper, 0., false, [0., 0.]);
+        out.image(
+            assets.background(state, previous),
+            wallpaper,
+            0.,
+            false,
+            [0., 0.],
+        );
         let alpha = (start.elapsed().as_secs_f32() / state.background_fade).min(1.);
         out.draw.push(Draw::TintedImage(
             assets.background(state, &state.preferences.background),
