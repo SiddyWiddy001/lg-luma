@@ -1,4 +1,4 @@
-﻿use crate::i18n::Language;
+use crate::i18n::Language;
 use crate::model::{
     App, BACKGROUNDS, CATEGORIES, CUSTOM_TILE_PREFIX, CustomTile, INPUT_NAME_LIMIT, InputMode,
     Inventory, Preferences, clean_input_name,
@@ -305,8 +305,9 @@ pub struct State {
     pub voice_time: f32,
     /// A short settings-row preview so the orb works without the mic key.
     pub voice_preview: Option<Instant>,
-    /// 1.0 = fully visible, 0.0 = hidden. The startup splash crossfades out over
-    /// `SPLASH_FADE` seconds, revealing the UI behind it.
+    /// 1.0 = fully visible, 0.0 = hidden. It starts hidden so desktop scenes are
+    /// unchanged; the TV launcher arms it before the first frame and it crossfades
+    /// out over `SPLASH_FADE` seconds, revealing the UI behind it.
     #[cfg(feature = "webos")]
     pub splash_fade: f32,
     /// When the splash crossfade started, recorded on the first frame.
@@ -372,7 +373,7 @@ impl State {
             voice_time: 0.,
             voice_preview: None,
             #[cfg(feature = "webos")]
-            splash_fade: 1.,
+            splash_fade: 0.,
             #[cfg(feature = "webos")]
             splash_start: None,
             #[cfg(feature = "webos")]

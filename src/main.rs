@@ -1003,6 +1003,13 @@ fn run() -> Result<(), String> {
     // Consecutive idle waits with nothing to draw or wait on; lets the loop back off its timed
     // wake instead of polling every 100 ms on an untouched screen.
     let mut idle_waits = 0u32;
+    // Arm the startup splash before the first scene so the very first frame presented on the TV
+    // already hides behind it. State::new leaves it hidden, so desktop scenes are untouched.
+    #[cfg(feature = "webos")]
+    {
+        state.splash_start = Some(Instant::now());
+        state.splash_fade = 1.;
+    }
     let mut scene = compose(
         &mut state,
         &assets,
