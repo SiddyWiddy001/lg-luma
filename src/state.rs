@@ -32,6 +32,8 @@ pub const VOICE_FADE: f32 = 0.2;
 /// How long the Settings row previews the orb when the mic key is unavailable.
 pub const VOICE_PREVIEW: Duration = Duration::from_millis(1600);
 pub const CYCLE_FADE: f32 = 1.6;
+/// Seconds the startup splash crossfades out, revealing the UI behind it.
+pub const SPLASH_FADE: f32 = 0.5;
 
 pub fn unix_now() -> u64 {
     std::time::SystemTime::now()
@@ -302,6 +304,13 @@ pub struct State {
     pub voice_time: f32,
     /// A short settings-row preview so the orb works without the mic key.
     pub voice_preview: Option<Instant>,
+    /// 1.0 = fully visible, 0.0 = hidden. The startup splash crossfades out over
+    /// `SPLASH_FADE` seconds, revealing the UI behind it.
+    pub splash_fade: f32,
+    /// When the splash crossfade started, recorded on the first frame.
+    pub splash_start: Option<Instant>,
+    /// Whether the splash crossfade has completed.
+    pub splash_done: bool,
 }
 
 impl State {
@@ -358,6 +367,9 @@ impl State {
             voice_level: 0.,
             voice_time: 0.,
             voice_preview: None,
+            splash_fade: 1.,
+            splash_start: None,
+            splash_done: false,
         }
     }
 
@@ -503,6 +515,7 @@ impl State {
             || self.voice_active
             || self.voice_preview.is_some()
             || self.voice_fade > 0.
+            || self.splash_fade > 0.
             || self.parallax != self.parallax_target
             || (!self.preferences.reduced_motion
                 && self

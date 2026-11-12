@@ -846,6 +846,7 @@ pub fn scene_with_pill(
         toast(&mut out, state, assets, notice);
     }
     voice_orb(&mut out, state);
+    splash_screen(&mut out, assets, state.splash_fade);
     out
 }
 
@@ -861,6 +862,21 @@ fn voice_orb(out: &mut Scene, state: &State) {
         state.voice_fade,
         state.voice_time,
     ));
+}
+
+fn splash_screen(out: &mut Scene, assets: &Assets, fade: f32) {
+    if fade <= 0. {
+        return;
+    }
+    // A full-screen black scrim with the Luma mark centered on it, drawn after every
+    // page so it sits on top. Both fade together over the splash duration, crossfading
+    // the UI in behind them.
+    let start = out.draw.len();
+    out.shape(Rect::new(0., 0., 1920., 1080.), 0., c(0, 1.));
+    let size = 200.;
+    let mark = Rect::new((1920. - size) / 2., (1080. - size) / 2., size, size);
+    out.icon(assets, "luma-mark", mark, WHITE);
+    out.fade(start, fade, 1.);
 }
 
 fn header(
