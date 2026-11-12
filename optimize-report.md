@@ -525,3 +525,44 @@ If a future maintainer wants the true early mount (up~10-15), the only path is:
 3. Repack initramfs
 4. Flash via recovery mode
    This is high-risk (brick potential) and requires signed artifacts. Documented here so we never chase this rabbit hole again.
+
+---
+
+## Luma Splash Screen (2026-11-12, commit `8bae335`)
+
+Added an in-app startup splash for the TV launch gap: a full-screen black scrim with the
+centred `luma-mark` vector logo, crossfading out over 0.5 s (`SPLASH_FADE`) to reveal the
+launcher behind it. Implementation:
+
+- `state.rs`: `SPLASH_FADE`, `splash_fade`, `splash_start`, `splash_done` - all
+  `#[cfg(feature = "webos")]`. `State::new` leaves `splash_fade` at 0 (hidden), so
+  desktop/test scenes compose exactly as before.
+- `view.rs`: `splash_screen()` (webos-only) draws the scrim and centred mark as one
+  faded group after everything else, so it sits on top.
+- `main.rs`: the frame loop eases `splash_fade` toward 0 over `SPLASH_FADE` seconds and
+  keeps the scene dirty until it completes; the launcher arms the splash
+  (`splash_start` + `splash_fade = 1`) immediately before the first `compose` so the
+  very first presented frame on the TV hides behind it.
+
+### CI lesson: tests run with `--all-features`
+
+`pnpm test` runs `cargo test --locked --workspace --all-features`, so the `webos`
+feature is enabled during unit tests. Gating code behind `webos` therefore does not keep
+it out of test scenes. The first gating attempt still failed
+`delete_confirmation_defaults_to_cancel_and_back_restores_side_popup` (popup action-icon
+count 5 vs 4) because the splash mark at screen centre (860, 440) lands inside that popup.
+Fix: the splash must start hidden in `State::new` and be armed only by the launcher in
+`main.rs` - a feature-gated scene draw is only safe when no test-constructed `State`
+can ever show it. Also removed a stray UTF-8 BOM accidentally introduced in `state.rs`.
+
+### CI and deploy status
+
+CI run <https://github.com/siddharthaxdwivedi/lg-luma/actions/runs/43305767478>: all nine
+jobs green (format, clippy, 304 unit tests, four smoke suites, verified ARM IPK).
+
+Deployment of that IPK (`com.ecklf.luma_2.16.2_arm.ipk` from the `luma-release`
+artifact) was blocked on 2026-11-12 ~21:15 local: the TV at 192.168.1.126 stopped
+responding to ICMP and TCP 22/3000, and Wake-on-LAN packets (unicast and broadcast, ports
+9/7/0) did not wake it. The neighbouring 192.168.1.x SSH hosts (.77/.98) reject the
+`pwnLG` key, so the TV has not merely changed address. The IPK is staged at
+`%TEMP%\luma-latest` and a retry/deploy script waits for the TV to return.
