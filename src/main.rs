@@ -1040,8 +1040,8 @@ fn run() -> Result<(), String> {
                 .splash_start
                 .as_ref()
                 .map_or(0., |start| start.elapsed().as_secs_f32());
-            state.splash_fade = ((crate::state::SPLASH_FADE - elapsed) / crate::state::SPLASH_FADE)
-                .clamp(0., 1.);
+            state.splash_fade =
+                ((crate::state::SPLASH_FADE - elapsed) / crate::state::SPLASH_FADE).clamp(0., 1.);
             if state.splash_fade <= 0. {
                 state.splash_done = true;
             } else {
