@@ -1,4 +1,4 @@
-use crate::i18n::Language;
+﻿use crate::i18n::Language;
 use crate::model::{
     App, BACKGROUNDS, CATEGORIES, CUSTOM_TILE_PREFIX, CustomTile, INPUT_NAME_LIMIT, InputMode,
     Inventory, Preferences, clean_input_name,
@@ -515,7 +515,6 @@ impl State {
             || self.voice_active
             || self.voice_preview.is_some()
             || self.voice_fade > 0.
-            || self.splash_fade > 0.
             || self.parallax != self.parallax_target
             || (!self.preferences.reduced_motion
                 && self
