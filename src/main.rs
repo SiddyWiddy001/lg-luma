@@ -1029,23 +1029,26 @@ fn run() -> Result<(), String> {
             state.dirty = true;
         }
         state.tick();
-        // Startup splash: record the start on the first frame and ease the fade toward
-        // zero over `SPLASH_FADE` seconds. Keep the scene dirty until it finishes so the
-        // crossfade runs at frame rate instead of in the idle backoff.
-        if !state.splash_done {
-            if state.splash_start.is_none() {
-                state.splash_start = Some(Instant::now());
-            }
-            let elapsed = state
-                .splash_start
-                .as_ref()
-                .map_or(0., |start| start.elapsed().as_secs_f32());
-            state.splash_fade =
-                ((crate::state::SPLASH_FADE - elapsed) / crate::state::SPLASH_FADE).clamp(0., 1.);
-            if state.splash_fade <= 0. {
-                state.splash_done = true;
-            } else {
-                state.dirty = true;
+        #[cfg(feature = "webos")]
+        {
+            // Startup splash: record the start on the first frame and ease the fade toward
+            // zero over `SPLASH_FADE` seconds. Keep the scene dirty until it finishes so the
+            // crossfade runs at frame rate instead of in the idle backoff.
+            if !state.splash_done {
+                if state.splash_start.is_none() {
+                    state.splash_start = Some(Instant::now());
+                }
+                let elapsed = state
+                    .splash_start
+                    .as_ref()
+                    .map_or(0., |start| start.elapsed().as_secs_f32());
+                state.splash_fade =
+                    ((crate::state::SPLASH_FADE - elapsed) / crate::state::SPLASH_FADE).clamp(0., 1.);
+                if state.splash_fade <= 0. {
+                    state.splash_done = true;
+                } else {
+                    state.dirty = true;
+                }
             }
         }
         // Ken Burns needs a live clock and a visible window. Previews pinned with --time or

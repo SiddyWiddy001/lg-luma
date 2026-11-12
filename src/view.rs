@@ -846,6 +846,7 @@ pub fn scene_with_pill(
         toast(&mut out, state, assets, notice);
     }
     voice_orb(&mut out, state);
+    #[cfg(feature = "webos")]
     splash_screen(&mut out, assets, state.splash_fade);
     out
 }
@@ -864,6 +865,7 @@ fn voice_orb(out: &mut Scene, state: &State) {
     ));
 }
 
+#[cfg(feature = "webos")]
 fn splash_screen(out: &mut Scene, assets: &Assets, fade: f32) {
     if fade <= 0. {
         return;

@@ -32,6 +32,7 @@ pub const VOICE_FADE: f32 = 0.2;
 /// How long the Settings row previews the orb when the mic key is unavailable.
 pub const VOICE_PREVIEW: Duration = Duration::from_millis(1600);
 pub const CYCLE_FADE: f32 = 1.6;
+#[cfg(feature = "webos")]
 /// Seconds the startup splash crossfades out, revealing the UI behind it.
 pub const SPLASH_FADE: f32 = 0.5;
 
@@ -306,10 +307,13 @@ pub struct State {
     pub voice_preview: Option<Instant>,
     /// 1.0 = fully visible, 0.0 = hidden. The startup splash crossfades out over
     /// `SPLASH_FADE` seconds, revealing the UI behind it.
+    #[cfg(feature = "webos")]
     pub splash_fade: f32,
     /// When the splash crossfade started, recorded on the first frame.
+    #[cfg(feature = "webos")]
     pub splash_start: Option<Instant>,
     /// Whether the splash crossfade has completed.
+    #[cfg(feature = "webos")]
     pub splash_done: bool,
 }
 
@@ -367,8 +371,11 @@ impl State {
             voice_level: 0.,
             voice_time: 0.,
             voice_preview: None,
+            #[cfg(feature = "webos")]
             splash_fade: 1.,
+            #[cfg(feature = "webos")]
             splash_start: None,
+            #[cfg(feature = "webos")]
             splash_done: false,
         }
     }
