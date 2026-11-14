@@ -152,7 +152,7 @@ fn stt_thread(
                         if let Some(single) = final_result.single() {
                             let text = single.text;
                             if !text.is_empty() {
-                                let _ = evt_tx.send(SttEvent::Final(text));
+                                let _ = evt_tx.send(SttEvent::Final(text.to_string()));
                             }
                         }
                         listening = false;
@@ -184,7 +184,7 @@ fn stt_thread(
                         if let Some(single) = result.single() {
                             let text = single.text;
                             if !text.is_empty() {
-                                let _ = evt_tx.send(SttEvent::Final(text));
+                                let _ = evt_tx.send(SttEvent::Final(text.to_string()));
                             }
                         }
                     }
@@ -193,7 +193,7 @@ fn stt_thread(
                         // PartialResult has .partial field (String)
                         let text = partial.partial;
                         if !text.is_empty() {
-                            let _ = evt_tx.send(SttEvent::Partial(text));
+                            let _ = evt_tx.send(SttEvent::Partial(text.to_string()));
                         }
                     }
                     Err(e) => {
@@ -275,7 +275,8 @@ impl AudioSource {
                 }
             }
             Self::Alsa(pcm) => {
-                // ALSA 0.12: readi is a method on PCM
+                // ALSA 0.12: readi is a method on PCM, need PCM trait
+                use alsa::pcm::PCM as _;
                 let frames = pcm
                     .readi(buffer)
                     .map_err(|e| format!("ALSA readi failed: {e}"))?;
