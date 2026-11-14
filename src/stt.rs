@@ -168,8 +168,9 @@ fn stt_thread(
                     if listening {
                         // Flush final result.
                         let text = recognizer.final_result();
-                        if !text.get_single().is_empty() {
-                            let _ = evt_tx.send(SttEvent::Final(text.get_single().to_string()));
+                        let text_str = text.single();
+                        if !text_str.is_empty() {
+                            let _ = evt_tx.send(SttEvent::Final(text_str.to_string()));
                         }
                         listening = false;
                         is_listening.store(false, Ordering::Relaxed);
@@ -199,7 +200,7 @@ fn stt_thread(
                 match recognizer.accept_waveform(&buffer[..frames_read]) {
                     Ok(DecodingState::Finalized) => {
                         let text = recognizer.result();
-                        let text_str = text.get_single();
+                        let text_str = text.single();
                         if !text_str.is_empty() {
                             let _ = evt_tx.send(SttEvent::Final(text_str.to_string()));
                         }
@@ -207,7 +208,7 @@ fn stt_thread(
                     }
                     Ok(DecodingState::Running) => {
                         let partial = recognizer.partial_result();
-                        let partial_str = partial.get_single();
+                        let partial_str = partial.single();
                         if !partial_str.is_empty() {
                             let _ = evt_tx.send(SttEvent::Partial(partial_str.to_string()));
                         }
@@ -295,6 +296,9 @@ impl AudioSource {
                 }
             }
             Self::Alsa(pcm) => {
+                // ALSA 0.12 uses `ioctl` with `snd_pcm_readi` which is exposed as `readi` on PCM
+                // but requires the `alsa::pcm::PCM` to have the right methods.
+                // In alsa 0.12, the method is `readi` on the PCM directly.
                 let frames = pcm
                     .readi(buffer)
                     .map_err(|e| format!("ALSA readi failed: {e}"))?;
