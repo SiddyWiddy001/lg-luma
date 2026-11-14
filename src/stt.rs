@@ -168,9 +168,11 @@ fn stt_thread(
                     if listening {
                         // Flush final result.
                         let final_result = recognizer.final_result();
-                        let text = final_result.text;
-                        if !text.is_empty() {
-                            let _ = evt_tx.send(SttEvent::Final(text.to_string()));
+                        // Vosk 0.3: CompleteResult has .get() method returning the text
+                        if let Some(text) = final_result.get() {
+                            if !text.is_empty() {
+                                let _ = evt_tx.send(SttEvent::Final(text.to_string()));
+                            }
                         }
                         listening = false;
                         is_listening.store(false, Ordering::Relaxed);
@@ -200,17 +202,21 @@ fn stt_thread(
                 match recognizer.accept_waveform(&buffer[..frames_read]) {
                     Ok(DecodingState::Finalized) => {
                         let result = recognizer.result();
-                        let text = result.text;
-                        if !text.is_empty() {
-                            let _ = evt_tx.send(SttEvent::Final(text.to_string()));
+                        // Vosk 0.3: CompleteResult has .get() method
+                        if let Some(text) = result.get() {
+                            if !text.is_empty() {
+                                let _ = evt_tx.send(SttEvent::Final(text.to_string()));
+                            }
                         }
                         // Recognizer auto-resets for next utterance.
                     }
                     Ok(DecodingState::Running) => {
                         let partial = recognizer.partial_result();
-                        let text = partial.partial;
-                        if !text.is_empty() {
-                            let _ = evt_tx.send(SttEvent::Partial(text.to_string()));
+                        // Vosk 0.3: PartialResult has .get() method
+                        if let Some(text) = partial.get() {
+                            if !text.is_empty() {
+                                let _ = evt_tx.send(SttEvent::Partial(text.to_string()));
+                            }
                         }
                     }
                     Err(e) => {
@@ -296,7 +302,8 @@ impl AudioSource {
                 }
             }
             Self::Alsa(pcm) => {
-                // ALSA 0.12: use readi on PCM directly
+                // ALSA 0.12: use readi on PCM directly - need to import the trait
+                use alsa::pcm::PCM as _;
                 let frames = pcm
                     .readi(buffer)
                     .map_err(|e| format!("ALSA readi failed: {e}"))?;
