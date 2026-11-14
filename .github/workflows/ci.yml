@@ -74,8 +74,7 @@ jobs:
           sudo apt-get "${apt_options[@]}" update
           # FontTools recommends large optional scientific Python packages. xauth is needed by xvfb-run.
           sudo apt-get "${apt_options[@]}" install -y --no-install-recommends \
-            libsdl2-dev pkg-config woff2 python3-fonttools libgl1-mesa-dri xvfb xauth \
-            libvosk-dev
+            libsdl2-dev pkg-config woff2 python3-fonttools libgl1-mesa-dri xvfb xauth
       - name: Check formatting
         run: pnpm format:check
       - name: Lint Rust and packaging tools
