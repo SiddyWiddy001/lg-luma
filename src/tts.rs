@@ -4,8 +4,8 @@
 //! it via espeak-ng, plays the audio via ALSA, and computes real-time RMS
 //! for the Voice Orb's dual-reactivity pulse.
 
-use std::sync::atomic::{AtomicBool, AtomicF32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicF32, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -208,8 +208,7 @@ impl AudioCallback {
             .map_err(|e| format!("set_rate failed: {e}"))?; // espeak default sample rate
         pcm.hw_params(&hwp)
             .map_err(|e| format!("hw_params failed: {e}"))?;
-        pcm.prepare()
-            .map_err(|e| format!("prepare failed: {e}"))?;
+        pcm.prepare().map_err(|e| format!("prepare failed: {e}"))?;
         Ok(pcm)
     }
 }

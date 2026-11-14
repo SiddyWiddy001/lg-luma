@@ -7,12 +7,12 @@
 //! While capturing, it also computes RMS and writes it to the shared
 //! `AtomicF32` that drives the Voice Orb's visual pulse.
 
-use std::sync::atomic::{AtomicBool, AtomicF32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicF32, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use crossbeam_channel::{bounded, Receiver, Sender};
+use crossbeam_channel::{Receiver, Sender, bounded};
 use vosk::{DecodingState, Model, Recognizer};
 
 /// Commands sent to the STT thread.
@@ -45,7 +45,9 @@ pub struct SttConfig {
 impl Default for SttConfig {
     fn default() -> Self {
         Self {
-            model_path: "/media/developer/apps/usr/palm/applications/com.ecklf.luma/assets/vosk-model".to_string(),
+            model_path:
+                "/media/developer/apps/usr/palm/applications/com.ecklf.luma/assets/vosk-model"
+                    .to_string(),
             sample_rate: 16000.0,
             chunk_frames: 1600, // 100 ms @ 16 kHz
         }
@@ -153,7 +155,8 @@ fn stt_thread(
                         recognizer = match Recognizer::new(&model, config.sample_rate) {
                             Ok(r) => r,
                             Err(e) => {
-                                let _ = evt_tx.send(SttEvent::Error(format!("recognizer reset failed: {e}")));
+                                let _ = evt_tx
+                                    .send(SttEvent::Error(format!("recognizer reset failed: {e}")));
                                 continue;
                             }
                         };
@@ -216,7 +219,8 @@ fn stt_thread(
                         }
                     }
                     Err(e) => {
-                        let _ = evt_tx.send(SttEvent::Error(format!("Vosk accept_waveform error: {e}")));
+                        let _ = evt_tx
+                            .send(SttEvent::Error(format!("Vosk accept_waveform error: {e}")));
                     }
                 }
             }
@@ -250,15 +254,23 @@ impl AudioSource {
         // Fallback: ALSA default capture device.
         #[cfg(target_os = "linux")]
         {
-            use alsa::{pcm::{PCM, HwParams, Format, Access, State}, Direction};
+            use alsa::{
+                Direction,
+                pcm::{Access, Format, HwParams, PCM, State},
+            };
             let pcm = PCM::new("default", Direction::Capture, false)
                 .map_err(|e| format!("ALSA open failed: {e}"))?;
             let hwp = HwParams::any(&pcm).map_err(|e| format!("HwParams any failed: {e}"))?;
-            hwp.set_access(Access::RWInterleaved).map_err(|e| format!("set_access failed: {e}"))?;
-            hwp.set_format(Format::s16()).map_err(|e| format!("set_format failed: {e}"))?;
-            hwp.set_channels(1).map_err(|e| format!("set_channels failed: {e}"))?;
-            hwp.set_rate_near(sample_rate as u32, 0).map_err(|e| format!("set_rate failed: {e}"))?;
-            pcm.hw_params(&hwp).map_err(|e| format!("hw_params failed: {e}"))?;
+            hwp.set_access(Access::RWInterleaved)
+                .map_err(|e| format!("set_access failed: {e}"))?;
+            hwp.set_format(Format::s16())
+                .map_err(|e| format!("set_format failed: {e}"))?;
+            hwp.set_channels(1)
+                .map_err(|e| format!("set_channels failed: {e}"))?;
+            hwp.set_rate_near(sample_rate as u32, 0)
+                .map_err(|e| format!("set_rate failed: {e}"))?;
+            pcm.hw_params(&hwp)
+                .map_err(|e| format!("hw_params failed: {e}"))?;
             pcm.prepare().map_err(|e| format!("prepare failed: {e}"))?;
             return Ok(Self::Alsa(pcm));
         }
@@ -270,8 +282,8 @@ impl AudioSource {
     fn read_chunk(&mut self, buffer: &mut [i16]) -> Result<usize, String> {
         match self {
             Self::VoiceInput(stream) => {
-                use std::os::unix::io::AsRawFd;
                 use std::io::Read;
+                use std::os::unix::io::AsRawFd;
                 // Read up to buffer.len() * 2 bytes.
                 let mut bytes = vec![0u8; buffer.len() * 2];
                 match stream.read(&mut bytes) {
@@ -288,13 +300,15 @@ impl AudioSource {
                 }
             }
             Self::Alsa(pcm) => {
-                let frames = pcm.readi(buffer)
+                let frames = pcm
+                    .readi(buffer)
                     .map_err(|e| format!("ALSA readi failed: {e}"))?;
                 if frames < 0 {
                     // XRUN recovery.
                     let state = pcm.state();
                     if state == State::XRun {
-                        pcm.prepare().map_err(|e| format!("XRUN prepare failed: {e}"))?;
+                        pcm.prepare()
+                            .map_err(|e| format!("XRUN prepare failed: {e}"))?;
                     }
                     Ok(0)
                 } else {

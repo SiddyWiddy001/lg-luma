@@ -623,7 +623,8 @@ impl State {
             self.voice_level = 0.;
             self.voice_time = 0.;
             self.tts_rms = 0.0;
-            self.tts_rms_atomic.store(0.0, std::sync::atomic::Ordering::Relaxed);
+            self.tts_rms_atomic
+                .store(0.0, std::sync::atomic::Ordering::Relaxed);
         }
     }
 

@@ -26,8 +26,8 @@ mod resample;
 mod scroll_preview;
 mod sdl_events;
 mod state;
-mod stt;
 mod storage;
+mod stt;
 mod text_rendering;
 #[path = "tile-editor.rs"]
 mod tile_editor;
@@ -1115,7 +1115,8 @@ fn run() -> Result<(), String> {
                             tokio::spawn(async move {
                                 // 1. First Qwen call.
                                 match cloud_agent::query_qwen(transcript, app_list, &conversation)
-                                    .await {
+                                    .await
+                                {
                                     Ok(cloud_agent::VoiceAction::Speak(text)) => {
                                         conversation.add_assistant(text.clone()).await;
                                         // Send TTS command to main thread.
@@ -1123,11 +1124,13 @@ fn run() -> Result<(), String> {
                                     }
                                     Ok(cloud_agent::VoiceAction::Launch(app_id)) => {
                                         // Find app name for status text.
-                                        let app_name = app_list.iter()
+                                        let app_name = app_list
+                                            .iter()
                                             .find(|(_, id)| id == &app_id)
                                             .map(|(name, _)| name.clone())
                                             .unwrap_or_else(|| app_id.clone());
-                                        state.voice_assistant_text = Some(format!("Opening {}...", app_name));
+                                        state.voice_assistant_text =
+                                            Some(format!("Opening {}...", app_name));
                                         state.dirty = true;
                                         // Execute luna-send launch.
                                         let _ = std::process::Command::new("luna-send")
@@ -1139,14 +1142,22 @@ fn run() -> Result<(), String> {
                                             .status();
                                     }
                                     Ok(cloud_agent::VoiceAction::Search(query)) => {
-                                        state.voice_assistant_text = Some(format!("Searching for {}...", query));
+                                        state.voice_assistant_text =
+                                            Some(format!("Searching for {}...", query));
                                         state.dirty = true;
-                                        if let Ok(snippets) = cloud_agent::web_search(&query).await {
+                                        if let Ok(snippets) = cloud_agent::web_search(&query).await
+                                        {
                                             if let Ok(cloud_agent::VoiceAction::Speak(text)) =
-                                                cloud_agent::summarize_search(&query, snippets, &conversation).await
+                                                cloud_agent::summarize_search(
+                                                    &query,
+                                                    snippets,
+                                                    &conversation,
+                                                )
+                                                .await
                                             {
                                                 // Send TTS command to main thread.
-                                                let _ = tts_cmd_tx.send(tts::TtsCommand::Speak(text));
+                                                let _ =
+                                                    tts_cmd_tx.send(tts::TtsCommand::Speak(text));
                                             }
                                         }
                                     }
