@@ -77,6 +77,9 @@ jobs:
           sudo apt-get "${apt_options[@]}" install -y --no-install-recommends \
             libsdl2-dev pkg-config woff2 python3-fonttools libgl1-mesa-dri xvfb xauth \
             cmake build-essential libasound2-dev libssl-dev
+      - name: Install formatting tools
+        run: |
+          cargo install --locked oxfmt
       - name: Format code
         run: cargo fmt --all
       - name: Format with oxfmt
