@@ -5,6 +5,7 @@ mod app_artwork;
 #[path = "app-subscription.rs"]
 mod app_subscription;
 mod branding;
+mod cloud_agent;
 mod companion;
 mod damage;
 mod diagnostics;
@@ -25,16 +26,15 @@ mod resample;
 mod scroll_preview;
 mod sdl_events;
 mod state;
+mod stt;
 mod storage;
 mod text_rendering;
 #[path = "tile-editor.rs"]
 mod tile_editor;
+mod tts;
 mod update;
 mod vector;
 mod view;
-mod cloud_agent;
-mod stt;
-mod tts;
 mod voice;
 mod wallpaper_cycle;
 mod wallpapers;
