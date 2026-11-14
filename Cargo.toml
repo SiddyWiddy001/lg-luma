@@ -34,7 +34,6 @@ time = { version = "0.3", features = ["local-offset", "formatting", "parsing"] }
 ureq = { version = "3.4", default-features = false, features = ["rustls"] }
 # Voice Assistant: STT, TTS, Cloud API
 vosk = "0.3"
-vosk-sys = { version = "0.2", features = ["build"] }
 espeak-ng = "0.2"
 reqwest = { version = "0.12", features = ["json", "rustls-tls", "stream"] }
 tokio = { version = "1.40", features = ["rt-multi-thread", "macros", "sync", "time"] }
