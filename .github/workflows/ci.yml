@@ -89,7 +89,14 @@ jobs:
       - name: Lint Rust and packaging tools
         run: pnpm check
       - name: Run unit tests
-        run: pnpm test
+        run: |
+          pnpm test:release
+          pnpm test:home
+          pnpm test:icons
+          pnpm test:wallpapers
+          pnpm test:tiles
+          cargo test --locked --workspace --all-features --exclude luma
+          cargo test --locked -p luma --features webos
       - name: Generate native assets
         run: pnpm assets
       - name: Build shared desktop preview
