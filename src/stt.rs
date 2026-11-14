@@ -168,7 +168,7 @@ fn stt_thread(
                     if listening {
                         // Flush final result.
                         let final_result = recognizer.final_result();
-                        let text = final_result.text();
+                        let text = final_result.text;
                         if !text.is_empty() {
                             let _ = evt_tx.send(SttEvent::Final(text.to_string()));
                         }
@@ -200,7 +200,7 @@ fn stt_thread(
                 match recognizer.accept_waveform(&buffer[..frames_read]) {
                     Ok(DecodingState::Finalized) => {
                         let result = recognizer.result();
-                        let text = result.text();
+                        let text = result.text;
                         if !text.is_empty() {
                             let _ = evt_tx.send(SttEvent::Final(text.to_string()));
                         }
@@ -208,7 +208,7 @@ fn stt_thread(
                     }
                     Ok(DecodingState::Running) => {
                         let partial = recognizer.partial_result();
-                        let text = partial.partial();
+                        let text = partial.partial;
                         if !text.is_empty() {
                             let _ = evt_tx.send(SttEvent::Partial(text.to_string()));
                         }
