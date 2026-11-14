@@ -191,16 +191,25 @@ impl AudioCallback {
 
     #[cfg(target_os = "linux")]
     fn init_alsa() -> Result<alsa::pcm::PCM, String> {
-        use alsa::{pcm::{PCM, HwParams, Format, Access, State}, Direction};
+        use alsa::{
+            Direction,
+            pcm::{Access, Format, HwParams, PCM, State},
+        };
         let pcm = PCM::new("default", Direction::Playback, false)
             .map_err(|e| format!("ALSA open failed: {e}"))?;
         let hwp = HwParams::any(&pcm).map_err(|e| format!("HwParams any failed: {e}"))?;
-        hwp.set_access(Access::RWInterleaved).map_err(|e| format!("set_access failed: {e}"))?;
-        hwp.set_format(Format::s16()).map_err(|e| format!("set_format failed: {e}"))?;
-        hwp.set_channels(1).map_err(|e| format!("set_channels failed: {e}"))?;
-        hwp.set_rate_near(22050, 0).map_err(|e| format!("set_rate failed: {e}"))?; // espeak default sample rate
-        pcm.hw_params(&hwp).map_err(|e| format!("hw_params failed: {e}"))?;
-        pcm.prepare().map_err(|e| format!("prepare failed: {e}"))?;
+        hwp.set_access(Access::RWInterleaved)
+            .map_err(|e| format!("set_access failed: {e}"))?;
+        hwp.set_format(Format::s16())
+            .map_err(|e| format!("set_format failed: {e}"))?;
+        hwp.set_channels(1)
+            .map_err(|e| format!("set_channels failed: {e}"))?;
+        hwp.set_rate_near(22050, 0)
+            .map_err(|e| format!("set_rate failed: {e}"))?; // espeak default sample rate
+        pcm.hw_params(&hwp)
+            .map_err(|e| format!("hw_params failed: {e}"))?;
+        pcm.prepare()
+            .map_err(|e| format!("prepare failed: {e}"))?;
         Ok(pcm)
     }
 }
