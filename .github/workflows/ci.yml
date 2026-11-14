@@ -84,7 +84,7 @@ jobs:
           sudo apt-get "${apt_options[@]}" install -y --no-install-recommends git
           cd /tmp
           git clone --depth 1 --branch v0.3.45 https://github.com/alphacep/vosk-api.git
-          cd vosk-api/src
+          cd vosk-api
           mkdir build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local ..
           make -j$(nproc)
