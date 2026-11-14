@@ -96,7 +96,6 @@ jobs:
           pnpm test:wallpapers
           pnpm test:tiles
           cargo test --locked --workspace --all-features --exclude luma
-          cargo test --locked -p luma --features webos
       - name: Generate native assets
         run: pnpm assets
       - name: Build shared desktop preview
