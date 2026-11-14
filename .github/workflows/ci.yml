@@ -99,7 +99,7 @@ jobs:
       - name: Generate native assets
         run: pnpm assets
       - name: Build shared desktop preview
-        run: cargo build --locked --package luma --no-default-features
+        run: cargo build --locked --package luma --no-default-features --features webos
       - name: Bundle shared smoke inputs
         run: tar -czf smoke-inputs.tar.gz .build/assets target/debug/luma
       - uses: actions/upload-artifact@v7
