@@ -29,7 +29,6 @@ pub enum SttEvent {
     Error(String),
 }
 
-/// Configuration for the STT engine.
 pub struct SttConfig {
     pub model_path: String,
     pub sample_rate: f32,
@@ -149,9 +148,11 @@ fn stt_thread(
                 SttCommand::StopListening => {
                     if listening {
                         let final_result = recognizer.final_result();
-                        if let Some(text) = final_result.single() {
+                        // Vosk 0.3: CompleteResult.single() returns CompleteResultSingle which has .text field
+                        if let Some(single) = final_result.single() {
+                            let text = single.text;
                             if !text.is_empty() {
-                                let _ = evt_tx.send(SttEvent::Final(text.to_string()));
+                                let _ = evt_tx.send(SttEvent::Final(text));
                             }
                         }
                         listening = false;
@@ -179,18 +180,20 @@ fn stt_thread(
                 match recognizer.accept_waveform(&buffer[..frames_read]) {
                     Ok(DecodingState::Finalized) => {
                         let result = recognizer.result();
-                        if let Some(text) = result.single() {
+                        // CompleteResult.single() returns CompleteResultSingle with .text field
+                        if let Some(single) = result.single() {
+                            let text = single.text;
                             if !text.is_empty() {
-                                let _ = evt_tx.send(SttEvent::Final(text.to_string()));
+                                let _ = evt_tx.send(SttEvent::Final(text));
                             }
                         }
                     }
                     Ok(DecodingState::Running) => {
                         let partial = recognizer.partial_result();
-                        if let Some(text) = partial.single() {
-                            if !text.is_empty() {
-                                let _ = evt_tx.send(SttEvent::Partial(text.to_string()));
-                            }
+                        // PartialResult has .partial field (String)
+                        let text = partial.partial;
+                        if !text.is_empty() {
+                            let _ = evt_tx.send(SttEvent::Partial(text));
                         }
                     }
                     Err(e) => {
@@ -227,7 +230,7 @@ impl AudioSource {
         {
             use alsa::{
                 Direction, ValueOr,
-                pcm::{Access, Format, HwParams, PCM, State},
+                pcm::{Access, Format, HwParams, PCM},
             };
             let pcm = PCM::new("default", Direction::Capture, false)
                 .map_err(|e| format!("ALSA open failed: {e}"))?;
@@ -272,13 +275,14 @@ impl AudioSource {
                 }
             }
             Self::Alsa(pcm) => {
+                // ALSA 0.12: readi is a method on PCM
                 let frames = pcm
                     .readi(buffer)
                     .map_err(|e| format!("ALSA readi failed: {e}"))?;
                 if frames < 0 {
-                    use alsa::pcm::State;
+                    // XRUN recovery - use fully qualified State
                     let state = pcm.state();
-                    if state == State::XRun {
+                    if state == alsa::pcm::State::XRun {
                         pcm.prepare()
                             .map_err(|e| format!("XRUN prepare failed: {e}"))?;
                     }
