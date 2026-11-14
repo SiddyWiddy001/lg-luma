@@ -275,11 +275,9 @@ impl AudioSource {
                 }
             }
             Self::Alsa(pcm) => {
-                // ALSA 0.12: use ioctl-based read via PCM methods
-                // readi is not a direct method, use the ioctl-based approach
-                let frames = pcm
-                    .readi(buffer)
-                    .map_err(|e| format!("ALSA readi failed: {e}"))?;
+                // ALSA 0.12: use the readi function from the pcm module
+                let frames =
+                    alsa::pcm::readi(pcm, buffer).map_err(|e| format!("ALSA readi failed: {e}"))?;
                 if frames < 0 {
                     let state = pcm.state();
                     if state == alsa::pcm::State::XRun {
