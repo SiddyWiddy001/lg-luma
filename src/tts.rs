@@ -5,7 +5,7 @@
 //! for the Voice Orb's dual-reactivity pulse.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicF32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -31,7 +31,7 @@ pub struct TtsHandle {
     cmd_tx: Sender<TtsCommand>,
     evt_rx: Receiver<TtsEvent>,
     /// Shared RMS level for the Voice Orb (0.0–1.0).
-    pub rms: Arc<AtomicF32>,
+    pub rms: Arc<AtomicI32>,
     /// Whether TTS is currently speaking.
     pub is_speaking: Arc<AtomicBool>,
     _thread: thread::JoinHandle<()>,
@@ -39,10 +39,10 @@ pub struct TtsHandle {
 
 impl TtsHandle {
     /// Spawn the TTS thread and return a handle.
-    pub fn spawn(tts_rms_atomic: Arc<std::sync::atomic::AtomicF32>) -> Result<Self, String> {
+    pub fn spawn(tts_rms_atomic: Arc<AtomicI32>) -> Result<Self, String> {
         let (cmd_tx, cmd_rx) = bounded(4);
         let (evt_tx, evt_rx) = bounded(16);
-        let rms = Arc::new(AtomicF32::new(0.0));
+        let rms = Arc::new(AtomicI32::new(0));
         let is_speaking = Arc::new(AtomicBool::new(false));
 
         let rms_clone = rms.clone();
@@ -85,9 +85,9 @@ impl TtsHandle {
 fn tts_thread(
     cmd_rx: Receiver<TtsCommand>,
     evt_tx: Sender<TtsEvent>,
-    rms: Arc<AtomicF32>,
+    rms: Arc<AtomicI32>,
     is_speaking: Arc<AtomicBool>,
-    tts_rms_atomic: Arc<std::sync::atomic::AtomicF32>,
+    tts_rms_atomic: Arc<AtomicI32>,
 ) {
     // Initialize espeak-ng.
     let mut espeak = match EspeakNg::new() {
@@ -146,8 +146,8 @@ fn tts_thread(
             // Check if espeak is still speaking.
             if !espeak.is_playing() {
                 is_speaking.store(false, Ordering::Relaxed);
-                rms.store(0.0, Ordering::Relaxed);
-                tts_rms_atomic.store(0.0, Ordering::Relaxed);
+                rms.store(0, Ordering::Relaxed);
+                tts_rms_atomic.store(0, Ordering::Relaxed);
                 let _ = evt_tx.send(TtsEvent::Finished);
             }
         }
@@ -158,9 +158,9 @@ fn tts_thread(
 
 /// espeak-ng audio callback for real-time RMS computation and playback.
 struct AudioCallback {
-    rms: Arc<AtomicF32>,
+    rms: Arc<AtomicI32>,
     is_speaking: Arc<AtomicBool>,
-    tts_rms_atomic: Arc<std::sync::atomic::AtomicF32>,
+    tts_rms_atomic: Arc<AtomicI32>,
     // ALSA playback handle
     #[cfg(target_os = "linux")]
     pcm: Option<alsa::pcm::PCM>,
@@ -169,9 +169,9 @@ struct AudioCallback {
 impl AudioCallback {
     #[cfg(target_os = "linux")]
     fn new(
-        rms: Arc<AtomicF32>,
+        rms: Arc<AtomicI32>,
         is_speaking: Arc<AtomicBool>,
-        tts_rms_atomic: Arc<std::sync::atomic::AtomicF32>,
+        tts_rms_atomic: Arc<AtomicI32>,
     ) -> Self {
         // Initialize ALSA playback device.
         let pcm = match Self::init_alsa() {
@@ -193,7 +193,7 @@ impl AudioCallback {
     fn init_alsa() -> Result<alsa::pcm::PCM, String> {
         use alsa::{
             Direction,
-            pcm::{Access, Format, HwParams, PCM, State},
+            pcm::{Access, Format, HwParams, PCM},
         };
         let pcm = PCM::new("default", Direction::Playback, false)
             .map_err(|e| format!("ALSA open failed: {e}"))?;
@@ -213,31 +213,53 @@ impl AudioCallback {
     }
 }
 
-impl espeak_ng::AudioCallback for AudioCallback {
-    fn on_audio(&mut self, data: &[i16], _sample_rate: u32) {
-        if !self.is_speaking.load(Ordering::Relaxed) {
-            return;
-        }
+/// Audio callback trait for espeak-ng synthesis.
+/// Uses a simple function pointer approach since espeak-ng doesn't expose a trait.
+type AudioCallbackFn = Box<dyn FnMut(&[i16], u32) + Send>;
 
-        // Compute RMS for the Voice Orb.
-        let sum_sq: f32 = data.iter().map(|&s| (s as f32 / 32768.0).powi(2)).sum();
-        let rms_val = (sum_sq / data.len() as f32).sqrt().min(1.0);
-        self.rms.store(rms_val, Ordering::Relaxed);
-        self.tts_rms_atomic.store(rms_val, Ordering::Relaxed);
+impl AudioCallback {
+    #[cfg(target_os = "linux")]
+    fn as_callback(&mut self) -> AudioCallbackFn {
+        let rms = self.rms.clone();
+        let is_speaking = self.is_speaking.clone();
+        let tts_rms_atomic = self.tts_rms_atomic.clone();
+        let pcm = self.pcm.clone();
 
-        // Write to ALSA for playback.
-        #[cfg(target_os = "linux")]
-        if let Some(pcm) = &self.pcm {
-            let bytes: Vec<u8> = data.iter().flat_map(|&s| s.to_le_bytes()).collect();
-            if let Err(e) = pcm.writei(&bytes) {
-                eprintln!("TTS ALSA write failed: {e}");
-                // Try to recover from XRUN.
-                if let Ok(state) = pcm.state() {
-                    if state == State::XRun {
-                        let _ = pcm.prepare();
+        Box::new(move |data: &[i16], _sample_rate: u32| {
+            if !is_speaking.load(Ordering::Relaxed) {
+                return;
+            }
+
+            // Compute RMS for the Voice Orb.
+            let sum_sq: f32 = data.iter().map(|&s| (s as f32 / 32768.0).powi(2)).sum();
+            let rms_val = (sum_sq / data.len() as f32).sqrt().min(1.0);
+            let rms_bits = rms_val.to_bits() as i32;
+            rms.store(rms_bits, Ordering::Relaxed);
+            tts_rms_atomic.store(rms_bits, Ordering::Relaxed);
+
+            // Write to ALSA for playback.
+            #[cfg(target_os = "linux")]
+            if let Some(pcm) = &pcm {
+                let bytes: Vec<u8> = data.iter().flat_map(|&s| s.to_le_bytes()).collect();
+                if let Err(e) = pcm.writei(&bytes) {
+                    eprintln!("TTS ALSA write failed: {e}");
+                    // Try to recover from XRUN.
+                    if let Ok(state) = pcm.state() {
+                        if state == alsa::pcm::State::XRun {
+                            let _ = pcm.prepare();
+                        }
                     }
                 }
             }
-        }
+        })
     }
+}
+
+// Helper functions for f32 <-> i32 bit conversion
+fn f32_to_bits(f: f32) -> i32 {
+    f.to_bits() as i32
+}
+
+fn bits_to_f32(bits: i32) -> f32 {
+    f32::from_bits(bits as u32)
 }

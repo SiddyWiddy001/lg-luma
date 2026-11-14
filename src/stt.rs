@@ -256,7 +256,7 @@ impl AudioSource {
         {
             use alsa::{
                 Direction,
-                pcm::{Access, Format, HwParams, PCM, State},
+                pcm::{Access, Format, HwParams, PCM},
             };
             let pcm = PCM::new("default", Direction::Capture, false)
                 .map_err(|e| format!("ALSA open failed: {e}"))?;
@@ -283,7 +283,6 @@ impl AudioSource {
         match self {
             Self::VoiceInput(stream) => {
                 use std::io::Read;
-                use std::os::unix::io::AsRawFd;
                 // Read up to buffer.len() * 2 bytes.
                 let mut bytes = vec![0u8; buffer.len() * 2];
                 match stream.read(&mut bytes) {
