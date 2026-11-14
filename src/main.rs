@@ -65,6 +65,11 @@ use std::{
 };
 use time::OffsetDateTime;
 
+/// UI commands sent from async Voice Assistant tasks to the main thread.
+enum VoiceUiCmd {
+    SetText(String),
+}
+
 #[derive(Default)]
 struct Options {
     webos_home: bool,
@@ -884,7 +889,7 @@ fn run() -> Result<(), String> {
         .ok();
 
     // Voice Assistant: share STT RMS with the Voice Orb for mic reactivity.
-    let stt_rms = stt_handle.as_ref().map(|h| h.rms.clone());
+    let _stt_rms = stt_handle.as_ref().map(|h| h.rms.clone());
 
     // Voice Assistant: initialize TTS engine (espeak-ng) for voice synthesis.
     // Share the TTS RMS atomic with the Voice Orb for dual-reactivity.
@@ -1087,6 +1092,9 @@ fn run() -> Result<(), String> {
             }
         }
 
+        // Voice Assistant: channel for async tasks to send UI updates to the main thread.
+        let (ui_tx, ui_rx) = crossbeam_channel::bounded(8);
+
         // Voice Assistant: poll STT events and drive the assistant pipeline.
         if let Some(handle) = &stt_handle {
             while let Some(event) = handle.try_recv() {
@@ -1112,10 +1120,15 @@ fn run() -> Result<(), String> {
                             let conversation = state.voice_conversation.clone();
                             let transcript = text;
                             let tts_cmd_tx = tts_cmd_tx.clone();
+                            let ui_tx_clone = ui_tx.clone();
                             tokio::spawn(async move {
                                 // 1. First Qwen call.
-                                match cloud_agent::query_qwen(transcript, app_list, &conversation)
-                                    .await
+                                match cloud_agent::query_qwen(
+                                    transcript,
+                                    app_list.clone(),
+                                    &conversation,
+                                )
+                                .await
                                 {
                                     Ok(cloud_agent::VoiceAction::Speak(text)) => {
                                         conversation.add_assistant(text.clone()).await;
@@ -1129,9 +1142,11 @@ fn run() -> Result<(), String> {
                                             .find(|(_, id)| id == &app_id)
                                             .map(|(name, _)| name.clone())
                                             .unwrap_or_else(|| app_id.clone());
-                                        state.voice_assistant_text =
-                                            Some(format!("Opening {}...", app_name));
-                                        state.dirty = true;
+                                        // Send UI update via channel.
+                                        let _ = ui_tx_clone.send(VoiceUiCmd::SetText(format!(
+                                            "Opening {}...",
+                                            app_name
+                                        )));
                                         // Execute luna-send launch.
                                         let _ = std::process::Command::new("luna-send")
                                             .args([
@@ -1142,9 +1157,10 @@ fn run() -> Result<(), String> {
                                             .status();
                                     }
                                     Ok(cloud_agent::VoiceAction::Search(query)) => {
-                                        state.voice_assistant_text =
-                                            Some(format!("Searching for {}...", query));
-                                        state.dirty = true;
+                                        let _ = ui_tx_clone.send(VoiceUiCmd::SetText(format!(
+                                            "Searching for {}...",
+                                            query
+                                        )));
                                         if let Ok(snippets) = cloud_agent::web_search(&query).await
                                         {
                                             if let Ok(cloud_agent::VoiceAction::Speak(text)) =
@@ -1163,8 +1179,8 @@ fn run() -> Result<(), String> {
                                     }
                                     Err(e) => {
                                         eprintln!("Voice Assistant error: {}", e);
-                                        state.voice_assistant_text = Some("Error".to_string());
-                                        state.dirty = true;
+                                        let _ = ui_tx_clone
+                                            .send(VoiceUiCmd::SetText("Error".to_string()));
                                     }
                                 }
                             });
@@ -1173,6 +1189,16 @@ fn run() -> Result<(), String> {
                     stt::SttEvent::Error(e) => {
                         eprintln!("STT error: {}", e);
                     }
+                }
+            }
+        }
+
+        // Voice Assistant: poll UI commands from async tasks and apply them.
+        while let Ok(cmd) = ui_rx.try_recv() {
+            match cmd {
+                VoiceUiCmd::SetText(text) => {
+                    state.voice_assistant_text = Some(text);
+                    state.dirty = true;
                 }
             }
         }

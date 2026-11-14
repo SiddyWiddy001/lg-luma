@@ -167,10 +167,9 @@ fn stt_thread(
                 SttCommand::StopListening => {
                     if listening {
                         // Flush final result.
-                        if let Some(text) = recognizer.final_result() {
-                            if !text.trim().is_empty() {
-                                let _ = evt_tx.send(SttEvent::Final(text));
-                            }
+                        let text = recognizer.final_result();
+                        if !text.get_single().is_empty() {
+                            let _ = evt_tx.send(SttEvent::Final(text.get_single().to_string()));
                         }
                         listening = false;
                         is_listening.store(false, Ordering::Relaxed);
@@ -196,26 +195,21 @@ fn stt_thread(
                 let rms_val = (sum_sq / frames_read as f32).sqrt().min(1.0);
                 rms.store(rms_val.to_bits() as i32, Ordering::Relaxed);
 
-                // Feed to Vosk.
-                let pcm_bytes: Vec<u8> = buffer[..frames_read]
-                    .iter()
-                    .flat_map(|&s| s.to_le_bytes())
-                    .collect();
-
-                match recognizer.accept_waveform(&pcm_bytes) {
+                // Feed to Vosk (accept_waveform takes &[i16]).
+                match recognizer.accept_waveform(&buffer[..frames_read]) {
                     Ok(DecodingState::Finalized) => {
-                        if let Some(text) = recognizer.result() {
-                            if !text.trim().is_empty() {
-                                let _ = evt_tx.send(SttEvent::Final(text));
-                            }
+                        let text = recognizer.result();
+                        let text_str = text.get_single();
+                        if !text_str.is_empty() {
+                            let _ = evt_tx.send(SttEvent::Final(text_str.to_string()));
                         }
                         // Recognizer auto-resets for next utterance.
                     }
                     Ok(DecodingState::Running) => {
-                        if let Some(partial) = recognizer.partial_result() {
-                            if !partial.trim().is_empty() {
-                                let _ = evt_tx.send(SttEvent::Partial(partial));
-                            }
+                        let partial = recognizer.partial_result();
+                        let partial_str = partial.get_single();
+                        if !partial_str.is_empty() {
+                            let _ = evt_tx.send(SttEvent::Partial(partial_str.to_string()));
                         }
                     }
                     Err(e) => {
@@ -255,7 +249,7 @@ impl AudioSource {
         #[cfg(target_os = "linux")]
         {
             use alsa::{
-                Direction,
+                Direction, ValueOr,
                 pcm::{Access, Format, HwParams, PCM, State},
             };
             let pcm = PCM::new("default", Direction::Capture, false)
@@ -268,7 +262,7 @@ impl AudioSource {
             hwp.set_channels(1)
                 .map_err(|e| format!("set_channels failed: {e}"))?;
             let rate = sample_rate as u32;
-            hwp.set_rate_near(rate, alsa::ValueOr::Nearest)
+            hwp.set_rate_near(rate, ValueOr::Nearest)
                 .map_err(|e| format!("set_rate failed: {e}"))?;
             pcm.hw_params(&hwp)
                 .map_err(|e| format!("hw_params failed: {e}"))?;
