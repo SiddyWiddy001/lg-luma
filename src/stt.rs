@@ -148,7 +148,6 @@ fn stt_thread(
                 SttCommand::StopListening => {
                     if listening {
                         let final_result = recognizer.final_result();
-                        // Vosk 0.3: CompleteResult.single() returns CompleteResultSingle which has .text field
                         if let Some(single) = final_result.single() {
                             let text = single.text;
                             if !text.is_empty() {
@@ -180,7 +179,6 @@ fn stt_thread(
                 match recognizer.accept_waveform(&buffer[..frames_read]) {
                     Ok(DecodingState::Finalized) => {
                         let result = recognizer.result();
-                        // CompleteResult.single() returns CompleteResultSingle with .text field
                         if let Some(single) = result.single() {
                             let text = single.text;
                             if !text.is_empty() {
@@ -190,11 +188,13 @@ fn stt_thread(
                     }
                     Ok(DecodingState::Running) => {
                         let partial = recognizer.partial_result();
-                        // PartialResult has .partial field (String)
                         let text = partial.partial;
                         if !text.is_empty() {
                             let _ = evt_tx.send(SttEvent::Partial(text.to_string()));
                         }
+                    }
+                    Ok(DecodingState::Failed) => {
+                        // Vosk decoding failed, just continue
                     }
                     Err(e) => {
                         let _ = evt_tx
@@ -275,13 +275,12 @@ impl AudioSource {
                 }
             }
             Self::Alsa(pcm) => {
-                // ALSA 0.12: readi is a method on PCM, need PCM trait
-                use alsa::pcm::PCM as _;
+                // ALSA 0.12: use ioctl-based read via PCM methods
+                // readi is not a direct method, use the ioctl-based approach
                 let frames = pcm
                     .readi(buffer)
                     .map_err(|e| format!("ALSA readi failed: {e}"))?;
                 if frames < 0 {
-                    // XRUN recovery - use fully qualified State
                     let state = pcm.state();
                     if state == alsa::pcm::State::XRun {
                         pcm.prepare()
