@@ -118,17 +118,17 @@ fn stt_thread(
 ) {
     // Load Vosk model.
     let model = match Model::new(&config.model_path) {
-        Ok(m) => m,
-        Err(e) => {
-            let _ = evt_tx.send(SttEvent::Error(format!("Vosk model load failed: {e}")));
+        Some(m) => m,
+        None => {
+            let _ = evt_tx.send(SttEvent::Error("Vosk model load failed".to_string()));
             return;
         }
     };
 
     let mut recognizer = match Recognizer::new(&model, config.sample_rate) {
-        Ok(r) => r,
-        Err(e) => {
-            let _ = evt_tx.send(SttEvent::Error(format!("Vosk recognizer init failed: {e}")));
+        Some(r) => r,
+        None => {
+            let _ = evt_tx.send(SttEvent::Error("Vosk recognizer init failed".to_string()));
             return;
         }
     };
@@ -153,10 +153,10 @@ fn stt_thread(
                 SttCommand::StartListening => {
                     if !listening {
                         recognizer = match Recognizer::new(&model, config.sample_rate) {
-                            Ok(r) => r,
-                            Err(e) => {
+                            Some(r) => r,
+                            None => {
                                 let _ = evt_tx
-                                    .send(SttEvent::Error(format!("recognizer reset failed: {e}")));
+                                    .send(SttEvent::Error("recognizer reset failed".to_string()));
                                 continue;
                             }
                         };
@@ -256,7 +256,7 @@ impl AudioSource {
         {
             use alsa::{
                 Direction,
-                pcm::{Access, Format, HwParams, PCM},
+                pcm::{Access, Format, HwParams, PCM, State},
             };
             let pcm = PCM::new("default", Direction::Capture, false)
                 .map_err(|e| format!("ALSA open failed: {e}"))?;
@@ -268,11 +268,12 @@ impl AudioSource {
             hwp.set_channels(1)
                 .map_err(|e| format!("set_channels failed: {e}"))?;
             let rate = sample_rate as u32;
-            hwp.set_rate_near(rate, 0)
+            hwp.set_rate_near(rate, alsa::ValueOr::Nearest)
                 .map_err(|e| format!("set_rate failed: {e}"))?;
             pcm.hw_params(&hwp)
                 .map_err(|e| format!("hw_params failed: {e}"))?;
             pcm.prepare().map_err(|e| format!("prepare failed: {e}"))?;
+            pcm.start().map_err(|e| format!("start failed: {e}"))?;
             return Ok(Self::Alsa(pcm));
         }
 
@@ -306,7 +307,7 @@ impl AudioSource {
                 if frames < 0 {
                     // XRUN recovery.
                     let state = pcm.state();
-                    if state == alsa::pcm::State::XRun {
+                    if state == State::XRun {
                         pcm.prepare()
                             .map_err(|e| format!("XRUN prepare failed: {e}"))?;
                     }

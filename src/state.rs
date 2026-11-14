@@ -323,7 +323,7 @@ pub struct State {
     /// Voice Assistant: smoothed TTS RMS level (0..1) for dual-reactivity orb pulse.
     pub tts_rms: f32,
     /// Voice Assistant: shared atomic TTS RMS for background TTS thread to write to.
-    pub tts_rms_atomic: std::sync::Arc<std::sync::atomic::AtomicF32>,
+    pub tts_rms_atomic: std::sync::Arc<std::sync::atomic::AtomicI32>,
 }
 
 impl State {
@@ -389,7 +389,7 @@ impl State {
             voice_assistant_text: None,
             voice_conversation: crate::cloud_agent::ConversationState::new(),
             tts_rms: 0.0,
-            tts_rms_atomic: std::sync::Arc::new(std::sync::atomic::AtomicF32::new(0.0)),
+            tts_rms_atomic: std::sync::Arc::new(std::sync::atomic::AtomicI32::new(0)),
         }
     }
 
@@ -611,9 +611,10 @@ impl State {
             // Voice Assistant: take the max of STT mic level and TTS level for dual-reactivity.
             let stt_level =
                 real_voice_level().unwrap_or_else(|| simulated_voice_level(self.voice_time));
-            let tts_level = self
-                .tts_rms_atomic
-                .load(std::sync::atomic::Ordering::Relaxed);
+            let tts_level = f32::from_bits(
+                self.tts_rms_atomic
+                    .load(std::sync::atomic::Ordering::Relaxed) as u32,
+            );
             let level = stt_level.max(tts_level);
             self.voice_level += (level - self.voice_level) * (1. - (-10. * dt).exp());
             self.dirty = true;
@@ -624,7 +625,7 @@ impl State {
             self.voice_time = 0.;
             self.tts_rms = 0.0;
             self.tts_rms_atomic
-                .store(0.0, std::sync::atomic::Ordering::Relaxed);
+                .store(0, std::sync::atomic::Ordering::Relaxed);
         }
     }
 
