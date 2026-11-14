@@ -79,7 +79,7 @@ jobs:
             cmake build-essential libasound2-dev libssl-dev
       - name: Install formatting tools
         run: |
-          cargo install --locked oxfmt
+          pnpm add -g oxfmt
       - name: Format code
         run: cargo fmt --all
       - name: Format with oxfmt
