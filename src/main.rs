@@ -1114,7 +1114,8 @@ fn run() -> Result<(), String> {
                             let tts_cmd_tx = tts_cmd_tx.clone();
                             tokio::spawn(async move {
                                 // 1. First Qwen call.
-                                match cloud_agent::query_qwen(transcript, app_list, &conversation).await {
+                                match cloud_agent::query_qwen(transcript, app_list, &conversation)
+                                    .await {
                                     Ok(cloud_agent::VoiceAction::Speak(text)) => {
                                         conversation.add_assistant(text.clone()).await;
                                         // Send TTS command to main thread.
