@@ -1162,19 +1162,16 @@ fn run() -> Result<(), String> {
                                             query
                                         )));
                                         if let Ok(snippets) = cloud_agent::web_search(&query).await
-                                        {
-                                            if let Ok(cloud_agent::VoiceAction::Speak(text)) =
+                                            && let Ok(cloud_agent::VoiceAction::Speak(text)) =
                                                 cloud_agent::summarize_search(
                                                     &query,
                                                     snippets,
                                                     &conversation,
                                                 )
                                                 .await
-                                            {
-                                                // Send TTS command to main thread.
-                                                let _ =
-                                                    tts_cmd_tx.send(tts::TtsCommand::Speak(text));
-                                            }
+                                        {
+                                            // Send TTS command to main thread.
+                                            let _ = tts_cmd_tx.send(tts::TtsCommand::Speak(text));
                                         }
                                     }
                                     Err(e) => {

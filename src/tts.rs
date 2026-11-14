@@ -23,17 +23,17 @@ pub enum TtsCommand {
 pub enum TtsEvent {
     Started,
     Finished,
-    Error(String),
+    Error,
 }
 
 /// Handle to the TTS background thread.
 pub struct TtsHandle {
     cmd_tx: Sender<TtsCommand>,
-    evt_rx: Receiver<TtsEvent>,
+    _evt_rx: Receiver<TtsEvent>,
     /// Shared RMS level for the Voice Orb (0.0-1.0, stored as f32 bits).
-    pub rms: Arc<AtomicI32>,
+    _rms: Arc<AtomicI32>,
     /// Whether TTS is currently speaking.
-    pub is_speaking: Arc<AtomicBool>,
+    _is_speaking: Arc<AtomicBool>,
     _thread: thread::JoinHandle<()>,
 }
 
@@ -58,9 +58,9 @@ impl TtsHandle {
 
         Ok(Self {
             cmd_tx,
-            evt_rx,
-            rms,
-            is_speaking,
+            _evt_rx: evt_rx,
+            _rms: rms,
+            _is_speaking: is_speaking,
             _thread: thread,
         })
     }
@@ -76,8 +76,8 @@ impl TtsHandle {
     }
 
     /// Try to receive the next TTS event (non-blocking).
-    pub fn try_recv(&self) -> Option<TtsEvent> {
-        self.evt_rx.try_recv().ok()
+    pub fn _try_recv(&self) -> Option<TtsEvent> {
+        self._evt_rx.try_recv().ok()
     }
 }
 
@@ -93,7 +93,7 @@ fn tts_thread(
     let mut espeak = match EspeakNg::new("en") {
         Ok(e) => e,
         Err(e) => {
-            let _ = evt_tx.send(TtsEvent::Error(format!("espeak-ng init failed: {e}")));
+            let _ = evt_tx.send(TtsEvent::Error);
             return;
         }
     };
@@ -116,8 +116,7 @@ fn tts_thread(
                             tts_rms_atomic.store(rms_bits, Ordering::Relaxed);
                         }
                         Err(e) => {
-                            let _ =
-                                evt_tx.send(TtsEvent::Error(format!("espeak synth failed: {e}")));
+                            let _ = evt_tx.send(TtsEvent::Error);
                         }
                     }
                 }

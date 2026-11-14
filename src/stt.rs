@@ -51,7 +51,7 @@ pub struct SttHandle {
     cmd_tx: Sender<SttCommand>,
     evt_rx: Receiver<SttEvent>,
     pub rms: Arc<AtomicI32>,
-    pub is_listening: Arc<AtomicBool>,
+    _is_listening: Arc<AtomicBool>,
     _thread: thread::JoinHandle<()>,
 }
 
@@ -249,7 +249,7 @@ impl AudioSource {
             pcm.prepare().map_err(|e| format!("prepare failed: {e}"))?;
             pcm.start().map_err(|e| format!("start failed: {e}"))?;
             drop(hwp);
-            return Ok(Self::Alsa(pcm));
+            Ok(Self::Alsa(pcm))
         }
 
         #[cfg(not(target_os = "linux"))]

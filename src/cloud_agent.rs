@@ -65,7 +65,7 @@ struct NimRequest {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-struct NimMessage {
+pub struct NimMessage {
     role: String,
     content: String,
 }
