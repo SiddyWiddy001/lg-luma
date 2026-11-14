@@ -275,21 +275,14 @@ impl AudioSource {
                 }
             }
             Self::Alsa(pcm) => {
-                // ALSA 0.12: use read method (readi might not exist in this version)
-                use alsa::pcm::PCM;
-                let frames = pcm
-                    .read(buffer)
-                    .map_err(|e| format!("ALSA read failed: {e}"))?;
-                if frames < 0 {
-                    let state = pcm.state();
-                    if state == alsa::pcm::State::XRun {
-                        pcm.prepare()
-                            .map_err(|e| format!("XRUN prepare failed: {e}"))?;
-                    }
-                    Ok(0)
-                } else {
-                    Ok(frames as usize)
-                }
+                // ALSA 0.12: use io_i16().readi() - returns Result<usize>
+                let io = pcm
+                    .io_i16()
+                    .map_err(|e| format!("ALSA io_i16 failed: {e}"))?;
+                let frames = io
+                    .readi(buffer)
+                    .map_err(|e| format!("ALSA readi failed: {e}"))?;
+                Ok(frames)
             }
         }
     }
