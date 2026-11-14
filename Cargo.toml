@@ -38,7 +38,7 @@ espeak-ng = "0.2"
 reqwest = { version = "0.12", features = ["json", "rustls-tls", "stream"] }
 tokio = { version = "1.40", features = ["rt-multi-thread", "macros", "sync", "time"] }
 crossbeam-channel = "0.5"
-alsa = "0.12"
+alsa = { version = "0.12", features = ["alsa-pcm"] }
 thiserror = "1.0"
 
 [profile.release]
