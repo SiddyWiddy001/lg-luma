@@ -24,21 +24,15 @@ pub enum SttCommand {
 /// Events published by the STT thread.
 #[derive(Debug, Clone)]
 pub enum SttEvent {
-    /// Partial transcript (while user is still speaking).
     Partial(String),
-    /// Final transcript (endpoint detected).
     Final(String),
-    /// Error message.
     Error(String),
 }
 
 /// Configuration for the STT engine.
 pub struct SttConfig {
-    /// Path to the Vosk model directory.
     pub model_path: String,
-    /// Sample rate (must match the audio source).
     pub sample_rate: f32,
-    /// Chunk size in frames (100 ms @ sample_rate).
     pub chunk_frames: usize,
 }
 
@@ -49,24 +43,20 @@ impl Default for SttConfig {
                 "/media/developer/apps/usr/palm/applications/com.ecklf.luma/assets/vosk-model"
                     .to_string(),
             sample_rate: 16000.0,
-            chunk_frames: 1600, // 100 ms @ 16 kHz
+            chunk_frames: 1600,
         }
     }
 }
 
-/// Handle to the STT background thread.
 pub struct SttHandle {
     cmd_tx: Sender<SttCommand>,
     evt_rx: Receiver<SttEvent>,
-    /// Shared RMS level for the Voice Orb (0.0-1.0, stored as f32 bits).
     pub rms: Arc<AtomicI32>,
-    /// Whether STT is currently capturing audio.
     pub is_listening: Arc<AtomicBool>,
     _thread: thread::JoinHandle<()>,
 }
 
 impl SttHandle {
-    /// Spawn the STT thread and return a handle.
     pub fn spawn(config: SttConfig) -> Result<Self, String> {
         let (cmd_tx, cmd_rx) = bounded(4);
         let (evt_tx, evt_rx) = bounded(16);
@@ -92,23 +82,19 @@ impl SttHandle {
         })
     }
 
-    /// Start capturing and recognizing.
     pub fn start(&self) {
         let _ = self.cmd_tx.send(SttCommand::StartListening);
     }
 
-    /// Stop capturing.
     pub fn stop(&self) {
         let _ = self.cmd_tx.send(SttCommand::StopListening);
     }
 
-    /// Try to receive the next STT event (non-blocking).
     pub fn try_recv(&self) -> Option<SttEvent> {
         self.evt_rx.try_recv().ok()
     }
 }
 
-/// Main STT thread loop.
 fn stt_thread(
     config: SttConfig,
     cmd_rx: Receiver<SttCommand>,
@@ -116,7 +102,6 @@ fn stt_thread(
     rms: Arc<AtomicI32>,
     is_listening: Arc<AtomicBool>,
 ) {
-    // Load Vosk model.
     let model = match Model::new(&config.model_path) {
         Some(m) => m,
         None => {
@@ -133,7 +118,6 @@ fn stt_thread(
         }
     };
 
-    // Audio capture setup: try webOS voiceinput socket first, then ALSA.
     let mut audio_source = match AudioSource::open(config.sample_rate) {
         Ok(src) => src,
         Err(e) => {
@@ -143,11 +127,9 @@ fn stt_thread(
     };
 
     let mut listening = false;
-    let chunk_bytes = config.chunk_frames * 2; // 16-bit mono = 2 bytes/frame
     let mut buffer = vec![0i16; config.chunk_frames];
 
     loop {
-        // Handle commands (non-blocking).
         while let Ok(cmd) = cmd_rx.try_recv() {
             match cmd {
                 SttCommand::StartListening => {
@@ -166,10 +148,8 @@ fn stt_thread(
                 }
                 SttCommand::StopListening => {
                     if listening {
-                        // Flush final result.
                         let final_result = recognizer.final_result();
-                        // Vosk 0.3: CompleteResult has .get() method returning the text
-                        if let Some(text) = final_result.get() {
+                        if let Some(text) = final_result.single() {
                             if !text.is_empty() {
                                 let _ = evt_tx.send(SttEvent::Final(text.to_string()));
                             }
@@ -187,10 +167,8 @@ fn stt_thread(
             continue;
         }
 
-        // Read one chunk from audio source.
         match audio_source.read_chunk(&mut buffer) {
             Ok(frames_read) if frames_read > 0 => {
-                // Compute RMS for the Voice Orb.
                 let sum_sq: f32 = buffer[..frames_read]
                     .iter()
                     .map(|&s| (s as f32 / 32768.0).powi(2))
@@ -198,22 +176,18 @@ fn stt_thread(
                 let rms_val = (sum_sq / frames_read as f32).sqrt().min(1.0);
                 rms.store(rms_val.to_bits() as i32, Ordering::Relaxed);
 
-                // Feed to Vosk (accept_waveform takes &[i16]).
                 match recognizer.accept_waveform(&buffer[..frames_read]) {
                     Ok(DecodingState::Finalized) => {
                         let result = recognizer.result();
-                        // Vosk 0.3: CompleteResult has .get() method
-                        if let Some(text) = result.get() {
+                        if let Some(text) = result.single() {
                             if !text.is_empty() {
                                 let _ = evt_tx.send(SttEvent::Final(text.to_string()));
                             }
                         }
-                        // Recognizer auto-resets for next utterance.
                     }
                     Ok(DecodingState::Running) => {
                         let partial = recognizer.partial_result();
-                        // Vosk 0.3: PartialResult has .get() method
-                        if let Some(text) = partial.get() {
+                        if let Some(text) = partial.single() {
                             if !text.is_empty() {
                                 let _ = evt_tx.send(SttEvent::Partial(text.to_string()));
                             }
@@ -226,7 +200,6 @@ fn stt_thread(
                 }
             }
             Ok(_) => {
-                // No data, brief sleep.
                 thread::sleep(Duration::from_millis(5));
             }
             Err(e) => {
@@ -237,7 +210,6 @@ fn stt_thread(
     }
 }
 
-/// Abstract audio source: webOS voiceinput socket or ALSA.
 enum AudioSource {
     VoiceInput(std::os::unix::net::UnixStream),
     Alsa(alsa::pcm::PCM),
@@ -245,14 +217,12 @@ enum AudioSource {
 
 impl AudioSource {
     fn open(sample_rate: f32) -> Result<Self, String> {
-        // Try webOS voiceinput socket first.
         const VOICE_INPUT_SOCK: &str = "/tmp/voiceinput_remote1.soc";
         if let Ok(stream) = std::os::unix::net::UnixStream::connect(VOICE_INPUT_SOCK) {
             stream.set_nonblocking(true).ok();
             return Ok(Self::VoiceInput(stream));
         }
 
-        // Fallback: ALSA default capture device.
         #[cfg(target_os = "linux")]
         {
             use alsa::{
@@ -275,6 +245,7 @@ impl AudioSource {
                 .map_err(|e| format!("hw_params failed: {e}"))?;
             pcm.prepare().map_err(|e| format!("prepare failed: {e}"))?;
             pcm.start().map_err(|e| format!("start failed: {e}"))?;
+            drop(hwp);
             return Ok(Self::Alsa(pcm));
         }
 
@@ -286,7 +257,6 @@ impl AudioSource {
         match self {
             Self::VoiceInput(stream) => {
                 use std::io::Read;
-                // Read up to buffer.len() * 2 bytes.
                 let mut bytes = vec![0u8; buffer.len() * 2];
                 match stream.read(&mut bytes) {
                     Ok(n) if n > 0 => {
@@ -302,13 +272,11 @@ impl AudioSource {
                 }
             }
             Self::Alsa(pcm) => {
-                // ALSA 0.12: use readi on PCM directly - need to import the trait
-                use alsa::pcm::PCM as _;
                 let frames = pcm
                     .readi(buffer)
                     .map_err(|e| format!("ALSA readi failed: {e}"))?;
                 if frames < 0 {
-                    // XRUN recovery.
+                    use alsa::pcm::State;
                     let state = pcm.state();
                     if state == State::XRun {
                         pcm.prepare()
