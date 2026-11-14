@@ -33,6 +33,9 @@ mod update;
 mod vector;
 mod view;
 mod voice;
+mod stt;
+mod cloud_agent;
+mod tts;
 mod wallpaper_cycle;
 mod wallpapers;
 mod weather;
@@ -871,6 +874,30 @@ fn run() -> Result<(), String> {
     // SAFETY: registered before any voice event is pushed.
     let voice_event = unsafe { event_subsystem.register_event()? };
     let _voice = voice::Voice::start(voice_event, event_subsystem.event_sender());
+
+    // Voice Assistant: initialize STT engine (Vosk) for voice transcription.
+    let stt_handle = stt::SttHandle::spawn(stt::SttConfig::default())
+        .map_err(|e| {
+            eprintln!("Voice Assistant STT init failed: {e}");
+            format!("STT spawn: {e}")
+        })
+        .ok();
+
+    // Voice Assistant: share STT RMS with the Voice Orb for mic reactivity.
+    let stt_rms = stt_handle.as_ref().map(|h| h.rms.clone());
+
+    // Voice Assistant: initialize TTS engine (espeak-ng) for voice synthesis.
+    // Share the TTS RMS atomic with the Voice Orb for dual-reactivity.
+    let tts_handle = tts::TtsHandle::spawn(state.tts_rms_atomic.clone())
+        .map_err(|e| {
+            eprintln!("Voice Assistant TTS init failed: {e}");
+            format!("TTS spawn: {e}")
+        })
+        .ok();
+
+    // Voice Assistant: channel for async tasks to send TTS commands to the main thread.
+    let (tts_cmd_tx, tts_cmd_rx) = crossbeam_channel::bounded(8);
+
     // Lifecycle as Home: sam sends "relaunch" (bring the running Luma to the front) instead of
     // killing and restarting it, and "close" when it wants Luma to exit. `end_registration`
     // drops a staged Home's registration (webOS 10/11) if a relaunch did not reach the front.
@@ -1059,6 +1086,99 @@ fn run() -> Result<(), String> {
                 }
             }
         }
+
+        // Voice Assistant: poll STT events and drive the assistant pipeline.
+        if let Some(handle) = &stt_handle {
+            while let Some(event) = handle.try_recv() {
+                match event {
+                    stt::SttEvent::Partial(text) => {
+                        state.voice_assistant_text = Some(format!("Listening: {}", text));
+                        state.dirty = true;
+                    }
+                    stt::SttEvent::Final(text) => {
+                        if !text.trim().is_empty() {
+                            state.voice_assistant_text = Some("Searching...".to_string());
+                            state.dirty = true;
+
+                            // Build app list from inventory for Qwen context.
+                            let app_list: Vec<(String, String)> = state
+                                .inventory
+                                .apps
+                                .iter()
+                                .map(|a| (a.title.clone(), a.id.clone()))
+                                .collect();
+
+                            // Spawn async task for Qwen + Search + TTS pipeline.
+                            let conversation = state.voice_conversation.clone();
+                            let transcript = text;
+                            let tts_cmd_tx = tts_cmd_tx.clone();
+                            tokio::spawn(async move {
+                                // 1. First Qwen call.
+                                match cloud_agent::query_qwen(transcript, app_list, &conversation).await {
+                                    Ok(cloud_agent::VoiceAction::Speak(text)) => {
+                                        conversation.add_assistant(text.clone()).await;
+                                        // Send TTS command to main thread.
+                                        let _ = tts_cmd_tx.send(tts::TtsCommand::Speak(text));
+                                    }
+                                    Ok(cloud_agent::VoiceAction::Launch(app_id)) => {
+                                        // Find app name for status text.
+                                        let app_name = app_list.iter()
+                                            .find(|(_, id)| id == &app_id)
+                                            .map(|(name, _)| name.clone())
+                                            .unwrap_or_else(|| app_id.clone());
+                                        state.voice_assistant_text = Some(format!("Opening {}...", app_name));
+                                        state.dirty = true;
+                                        // Execute luna-send launch.
+                                        let _ = std::process::Command::new("luna-send")
+                                            .args([
+                                                "-n", "1",
+                                                "luna://com.webos.applicationManager/launch",
+                                                &format!("{{\"id\":\"{}\",\"params\":{{}},\"subscribe\":true}}", app_id),
+                                            ])
+                                            .status();
+                                    }
+                                    Ok(cloud_agent::VoiceAction::Search(query)) => {
+                                        state.voice_assistant_text = Some(format!("Searching for {}...", query));
+                                        state.dirty = true;
+                                        if let Ok(snippets) = cloud_agent::web_search(&query).await {
+                                            if let Ok(cloud_agent::VoiceAction::Speak(text)) =
+                                                cloud_agent::summarize_search(&query, snippets, &conversation).await
+                                            {
+                                                // Send TTS command to main thread.
+                                                let _ = tts_cmd_tx.send(tts::TtsCommand::Speak(text));
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Voice Assistant error: {}", e);
+                                        state.voice_assistant_text = Some("Error".to_string());
+                                        state.dirty = true;
+                                    }
+                                }
+                            });
+                        }
+                    }
+                    stt::SttEvent::Error(e) => {
+                        eprintln!("STT error: {}", e);
+                    }
+                }
+            }
+        }
+
+        // Voice Assistant: poll TTS commands from async tasks and execute them.
+        if let Some(handle) = &tts_handle {
+            while let Ok(cmd) = tts_cmd_rx.try_recv() {
+                match cmd {
+                    tts::TtsCommand::Speak(text) => {
+                        handle.speak(text);
+                    }
+                    tts::TtsCommand::Stop => {
+                        handle.stop();
+                    }
+                }
+            }
+        }
+
         // Ken Burns needs a live clock and a visible window. Previews pinned with --time or
         // --screenshot stay deterministic and still.
         let ken_burns = visible
@@ -1355,12 +1475,21 @@ fn run() -> Result<(), String> {
             match event {
                 Event::Quit { .. } => running = false,
                 Event::User { type_, code, .. } if type_ == voice_event => {
-                    // Best effort: the orb follows the mic key when the device is
-                    // readable, and is otherwise previewed from Settings.
+                    // Voice Assistant: mic key press/release starts/stops STT and updates orb.
                     if state.preferences.voice_orb {
+                        let was_active = state.voice_active;
                         state.voice_active = code != 0;
                         if state.voice_active {
                             state.voice_time = 0.;
+                            // Start STT on mic press.
+                            if let Some(handle) = &stt_handle {
+                                handle.start();
+                            }
+                        } else if was_active {
+                            // Stop STT on mic release, get final transcript.
+                            if let Some(handle) = &stt_handle {
+                                handle.stop();
+                            }
                         }
                         state.dirty = true;
                     }

@@ -316,6 +316,14 @@ pub struct State {
     /// Whether the splash crossfade has completed.
     #[cfg(feature = "webos")]
     pub splash_done: bool,
+    /// Voice Assistant: current UI status text (e.g., "Searching...", "Opening YouTube...")
+    pub voice_assistant_text: Option<String>,
+    /// Voice Assistant: conversation history for Qwen.
+    pub voice_conversation: crate::cloud_agent::ConversationState,
+    /// Voice Assistant: smoothed TTS RMS level (0..1) for dual-reactivity orb pulse.
+    pub tts_rms: f32,
+    /// Voice Assistant: shared atomic TTS RMS for background TTS thread to write to.
+    pub tts_rms_atomic: std::sync::Arc<std::sync::atomic::AtomicF32>,
 }
 
 impl State {
@@ -378,6 +386,10 @@ impl State {
             splash_start: None,
             #[cfg(feature = "webos")]
             splash_done: false,
+            voice_assistant_text: None,
+            voice_conversation: crate::cloud_agent::ConversationState::new(),
+            tts_rms: 0.0,
+            tts_rms_atomic: std::sync::Arc::new(std::sync::atomic::AtomicF32::new(0.0)),
         }
     }
 
@@ -596,8 +608,13 @@ impl State {
             self.voice_time += dt;
             // REAL AUDIO PLUG POINT: `real_voice_level` returns the RMS of the
             // webOS `voiceinput` socket PCM once that capture is verified.
-            let level =
+            // Voice Assistant: take the max of STT mic level and TTS level for dual-reactivity.
+            let stt_level =
                 real_voice_level().unwrap_or_else(|| simulated_voice_level(self.voice_time));
+            let tts_level = self
+                .tts_rms_atomic
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let level = stt_level.max(tts_level);
             self.voice_level += (level - self.voice_level) * (1. - (-10. * dt).exp());
             self.dirty = true;
         } else {
@@ -605,6 +622,8 @@ impl State {
             self.dirty |= self.voice_fade == 0. && self.voice_time > 0.;
             self.voice_level = 0.;
             self.voice_time = 0.;
+            self.tts_rms = 0.0;
+            self.tts_rms_atomic.store(0.0, std::sync::atomic::Ordering::Relaxed);
         }
     }
 

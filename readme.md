@@ -8,6 +8,17 @@ A highly optimized, deeply modified fork of Luma for the LG C1 (webOS 6).
 - **Parallax Wallpapers:** 4K backgrounds shift based on app focus.
 - **Reactive Voice Orb:** GLSL shader with simulated audio fallback.
 - **Glass UI:** Fixed straight-alpha blending and 25% milky glass tiles.
+- **Siri-Style Voice Assistant:** Full STT → Qwen (NVIDIA NIM) → TTS pipeline with dual-reactivity Voice Orb (mic + TTS audio), live web search, conversation memory, and silent app launch.
+
+## Voice Assistant Setup
+
+The Voice Assistant uses NVIDIA NIM's Qwen model. To enable it, install your API key on the TV:
+
+```bash
+ssh -i pwnLG/pwn_ed25519 root@192.168.1.126 "echo 'YOUR_KEY' > /var/lib/luma-home/.nim_key && chmod 600 /var/lib/luma-home/.nim_key"
+```
+
+The key is read at runtime from `/var/lib/luma-home/.nim_key` and is never logged or exposed.
 
 ## Architecture
 

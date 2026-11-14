@@ -902,6 +902,16 @@ fn header(
         WHITE,
         false,
     );
+    // Voice Assistant status text (e.g., "Searching...", "Opening YouTube...")
+    if let Some(text) = &state.voice_assistant_text {
+        out.text(
+            text,
+            Rect::new(84., 96., 1752., 28.8),
+            text(20.8, 500, -0.03),
+            c(0xffffff, 0.9),
+            false,
+        );
+    }
     let layout = navigation(assets, language);
     let nav = layout.surface;
     out.shadow(nav, 48., 18., 4., 0.06);
