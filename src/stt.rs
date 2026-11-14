@@ -5,10 +5,10 @@
 //! publishes partial/final transcripts via crossbeam-channel.
 //!
 //! While capturing, it also computes RMS and writes it to the shared
-//! `AtomicF32` that drives the Voice Orb's visual pulse.
+//! `AtomicI32` (f32 bits) that drives the Voice Orb's visual pulse.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicF32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -58,8 +58,8 @@ impl Default for SttConfig {
 pub struct SttHandle {
     cmd_tx: Sender<SttCommand>,
     evt_rx: Receiver<SttEvent>,
-    /// Shared RMS level for the Voice Orb (0.0–1.0).
-    pub rms: Arc<AtomicF32>,
+    /// Shared RMS level for the Voice Orb (0.0-1.0, stored as f32 bits).
+    pub rms: Arc<AtomicI32>,
     /// Whether STT is currently capturing audio.
     pub is_listening: Arc<AtomicBool>,
     _thread: thread::JoinHandle<()>,
@@ -70,7 +70,7 @@ impl SttHandle {
     pub fn spawn(config: SttConfig) -> Result<Self, String> {
         let (cmd_tx, cmd_rx) = bounded(4);
         let (evt_tx, evt_rx) = bounded(16);
-        let rms = Arc::new(AtomicF32::new(0.0));
+        let rms = Arc::new(AtomicI32::new(0));
         let is_listening = Arc::new(AtomicBool::new(false));
 
         let rms_clone = rms.clone();
@@ -113,7 +113,7 @@ fn stt_thread(
     config: SttConfig,
     cmd_rx: Receiver<SttCommand>,
     evt_tx: Sender<SttEvent>,
-    rms: Arc<AtomicF32>,
+    rms: Arc<AtomicI32>,
     is_listening: Arc<AtomicBool>,
 ) {
     // Load Vosk model.
@@ -167,14 +167,14 @@ fn stt_thread(
                 SttCommand::StopListening => {
                     if listening {
                         // Flush final result.
-                        if let Ok(text) = recognizer.final_result() {
+                        if let Some(text) = recognizer.final_result() {
                             if !text.trim().is_empty() {
                                 let _ = evt_tx.send(SttEvent::Final(text));
                             }
                         }
                         listening = false;
                         is_listening.store(false, Ordering::Relaxed);
-                        rms.store(0.0, Ordering::Relaxed);
+                        rms.store(0, Ordering::Relaxed);
                     }
                 }
             }
@@ -194,7 +194,7 @@ fn stt_thread(
                     .map(|&s| (s as f32 / 32768.0).powi(2))
                     .sum();
                 let rms_val = (sum_sq / frames_read as f32).sqrt().min(1.0);
-                rms.store(rms_val, Ordering::Relaxed);
+                rms.store(rms_val.to_bits() as i32, Ordering::Relaxed);
 
                 // Feed to Vosk.
                 let pcm_bytes: Vec<u8> = buffer[..frames_read]
@@ -204,7 +204,7 @@ fn stt_thread(
 
                 match recognizer.accept_waveform(&pcm_bytes) {
                     Ok(DecodingState::Finalized) => {
-                        if let Ok(text) = recognizer.result() {
+                        if let Some(text) = recognizer.result() {
                             if !text.trim().is_empty() {
                                 let _ = evt_tx.send(SttEvent::Final(text));
                             }
@@ -212,7 +212,7 @@ fn stt_thread(
                         // Recognizer auto-resets for next utterance.
                     }
                     Ok(DecodingState::Running) => {
-                        if let Ok(partial) = recognizer.partial_result() {
+                        if let Some(partial) = recognizer.partial_result() {
                             if !partial.trim().is_empty() {
                                 let _ = evt_tx.send(SttEvent::Partial(partial));
                             }
@@ -267,7 +267,8 @@ impl AudioSource {
                 .map_err(|e| format!("set_format failed: {e}"))?;
             hwp.set_channels(1)
                 .map_err(|e| format!("set_channels failed: {e}"))?;
-            hwp.set_rate_near(sample_rate as u32, 0)
+            let rate = sample_rate as u32;
+            hwp.set_rate_near(rate, 0)
                 .map_err(|e| format!("set_rate failed: {e}"))?;
             pcm.hw_params(&hwp)
                 .map_err(|e| format!("hw_params failed: {e}"))?;
@@ -305,7 +306,7 @@ impl AudioSource {
                 if frames < 0 {
                     // XRUN recovery.
                     let state = pcm.state();
-                    if state == State::XRun {
+                    if state == alsa::pcm::State::XRun {
                         pcm.prepare()
                             .map_err(|e| format!("XRUN prepare failed: {e}"))?;
                     }

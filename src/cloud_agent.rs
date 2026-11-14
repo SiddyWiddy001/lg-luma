@@ -165,7 +165,7 @@ pub async fn query_qwen(
         return Err(CloudError::KeyMissing(NIM_KEY_PATH.to_string()));
     }
 
-    let client = Client::builder()
+    let _client = Client::builder()
         .timeout(REQUEST_TIMEOUT)
         .build()
         .map_err(|e| CloudError::Network(e.to_string()))?;
@@ -312,7 +312,7 @@ pub async fn summarize_search(
         return Err(CloudError::KeyMissing(NIM_KEY_PATH.to_string()));
     }
 
-    let client = Client::builder()
+    let _client = Client::builder()
         .timeout(REQUEST_TIMEOUT)
         .build()
         .map_err(|e| CloudError::Network(e.to_string()))?;

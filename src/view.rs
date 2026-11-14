@@ -903,9 +903,9 @@ fn header(
         false,
     );
     // Voice Assistant status text (e.g., "Searching...", "Opening YouTube...")
-    if let Some(text) = &state.voice_assistant_text {
+    if let Some(va_text) = &state.voice_assistant_text {
         out.text(
-            text,
+            va_text,
             Rect::new(84., 96., 1752., 28.8),
             text(20.8, 500, -0.03),
             c(0xffffff, 0.9),
