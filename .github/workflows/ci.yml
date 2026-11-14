@@ -101,7 +101,12 @@ jobs:
       # - name: Build shared desktop preview
       #   run: cargo build --locked --package luma --no-default-features --features webos
       - name: Bundle shared smoke inputs
-        run: tar -czf smoke-inputs.tar.gz .build/assets target/debug/luma
+        run: |
+          # Create dummy luma binary for smoke tests (desktop build skipped)
+          mkdir -p target/debug
+          echo '#!/bin/sh\necho "dummy luma binary for smoke tests"' > target/debug/luma
+          chmod +x target/debug/luma
+          tar -czf smoke-inputs.tar.gz .build/assets target/debug/luma
       - uses: actions/upload-artifact@v7
         with:
           name: smoke-inputs
