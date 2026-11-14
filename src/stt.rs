@@ -76,7 +76,7 @@ impl SttHandle {
             cmd_tx,
             evt_rx,
             rms,
-            is_listening,
+            _is_listening: is_listening,
             _thread: thread,
         })
     }

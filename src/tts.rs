@@ -92,7 +92,7 @@ fn tts_thread(
     // Initialize espeak-ng for English (also selects the voice).
     let mut espeak = match EspeakNg::new("en") {
         Ok(e) => e,
-        Err(e) => {
+        Err(_e) => {
             let _ = evt_tx.send(TtsEvent::Error);
             return;
         }
@@ -115,7 +115,7 @@ fn tts_thread(
                             rms.store(rms_bits, Ordering::Relaxed);
                             tts_rms_atomic.store(rms_bits, Ordering::Relaxed);
                         }
-                        Err(e) => {
+                        Err(_e) => {
                             let _ = evt_tx.send(TtsEvent::Error);
                         }
                     }
