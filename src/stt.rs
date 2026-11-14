@@ -275,10 +275,9 @@ impl AudioSource {
                 }
             }
             Self::Alsa(pcm) => {
-                // ALSA 0.12: use read method (readi might not exist)
-                let frames = pcm
-                    .read(buffer)
-                    .map_err(|e| format!("ALSA read failed: {e}"))?;
+                // ALSA 0.12: use fully qualified readi method call
+                let frames = alsa::pcm::PCM::readi(&mut pcm, buffer)
+                    .map_err(|e| format!("ALSA readi failed: {e}"))?;
                 if frames < 0 {
                     let state = pcm.state();
                     if state == alsa::pcm::State::XRun {
