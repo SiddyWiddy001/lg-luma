@@ -168,10 +168,9 @@ fn stt_thread(
                     if listening {
                         // Flush final result.
                         let final_result = recognizer.final_result();
-                        if let Some(text) = final_result.single() {
-                            if !text.is_empty() {
-                                let _ = evt_tx.send(SttEvent::Final(text.to_string()));
-                            }
+                        let text = final_result.text();
+                        if !text.is_empty() {
+                            let _ = evt_tx.send(SttEvent::Final(text.to_string()));
                         }
                         listening = false;
                         is_listening.store(false, Ordering::Relaxed);
@@ -201,19 +200,17 @@ fn stt_thread(
                 match recognizer.accept_waveform(&buffer[..frames_read]) {
                     Ok(DecodingState::Finalized) => {
                         let result = recognizer.result();
-                        if let Some(text) = result.single() {
-                            if !text.is_empty() {
-                                let _ = evt_tx.send(SttEvent::Final(text.to_string()));
-                            }
+                        let text = result.text();
+                        if !text.is_empty() {
+                            let _ = evt_tx.send(SttEvent::Final(text.to_string()));
                         }
                         // Recognizer auto-resets for next utterance.
                     }
                     Ok(DecodingState::Running) => {
                         let partial = recognizer.partial_result();
-                        if let Some(text) = partial.partial() {
-                            if !text.is_empty() {
-                                let _ = evt_tx.send(SttEvent::Partial(text.to_string()));
-                            }
+                        let text = partial.partial();
+                        if !text.is_empty() {
+                            let _ = evt_tx.send(SttEvent::Partial(text.to_string()));
                         }
                     }
                     Err(e) => {
